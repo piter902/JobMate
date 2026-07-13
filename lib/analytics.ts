@@ -10,21 +10,19 @@ async function getDistinctId(): Promise<string> {
   return id;
 }
 
-/** 保存最近事件到 storage（方便验证） */
-async function saveLog(entry: { event: string; time: string; props?: Record<string, unknown> }) {
+async function saveLog(entry: Record<string, unknown>) {
   const key = 'ph_recent_events';
   const r = await chrome.storage.local.get(key);
-  const events = (r[key] || []).slice(-9); // 保留最近10条
+  const events = (r[key] || []).slice(-9);
   events.push(entry);
   await chrome.storage.local.set({ [key]: events });
 }
 
 export async function track(event: string, props?: Record<string, unknown>): Promise<void> {
-  const entry = { event, time: new Date().toISOString(), props };
-  await saveLog(entry);
+  const entry: Record<string, unknown> = { event, time: new Date().toISOString(), props };
 
   try {
-    await fetch(`${PH_HOST}/capture`, {
+    const res = await fetch(`${PH_HOST}/capture`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -34,11 +32,17 @@ export async function track(event: string, props?: Record<string, unknown>): Pro
         properties: { ...props, $lib: 'greeting-agent' },
       }),
     });
-  } catch { /* 不影响主流程 */ }
+    entry.status = res.status;
+    entry.sent = res.ok;
+  } catch (err) {
+    entry.error = (err as Error).message;
+    entry.sent = false;
+  }
+
+  await saveLog(entry);
 }
 
-/** 读最近事件（popup 调试用） */
-export async function getRecentEvents(): Promise<Array<{ event: string; time: string; props?: Record<string, unknown> }>> {
+export async function getRecentEvents(): Promise<Array<Record<string, unknown>>> {
   const r = await chrome.storage.local.get('ph_recent_events');
   return r['ph_recent_events'] || [];
 }

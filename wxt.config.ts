@@ -15,7 +15,7 @@ export default defineConfig({
     description: '在Boss直聘上根据JD和简历自动生成个性化招呼语',
     version: '0.1.0',
     permissions: ['storage', 'clipboardWrite'],
-    host_permissions: ['*://*.zhipin.com/*'],
+    host_permissions: ['*://*.zhipin.com/*', '*://*.posthog.com/*'],
     content_scripts: [
       {
         matches: ['*://*.zhipin.com/*'],
