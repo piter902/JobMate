@@ -28,12 +28,12 @@ export default function App() {
     chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
     try {
       const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); track('greeting_button_clicked', { focus }); }
+      if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); }
     } catch {}
   }, []);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
-    setCollapsed(false); track('greeting_button_clicked', { focus });
+    setCollapsed(false);
     setDebug('⏳ 分析中...');
     setStatus('loading');
     setResult(null);
