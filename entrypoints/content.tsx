@@ -24,9 +24,8 @@ function injectUI() {
   container.id = 'greeting-agent-root';
   container.style.cssText = [
     'position:fixed', 'top:12px', 'right:16px',
-    'z-index:999999', 'background:#fff', 'padding:12px 16px',
-    'border-radius:12px', 'box-shadow:0 2px 20px rgba(0,0,0,0.15)',
-    'max-width:340px',
+    'z-index:999999', 'background:#fff', 'padding:12px 14px',
+    'border-radius:10px', 'box-shadow:0 2px 20px rgba(0,0,0,0.12)',
   ].join(';');
   document.body.appendChild(container);
 
