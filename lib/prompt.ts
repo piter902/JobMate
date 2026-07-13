@@ -2,29 +2,32 @@ import type { FocusOption } from './types';
 
 const FOCUS_INSTRUCTIONS: Record<FocusOption, string> = {
   none: '',
-  experience: '重点突出简历中与 JD 要求年限、行业背景、岗位类型最匹配的经历。',
-  skills: '重点突出简历中与 JD 要求技术栈、工具、语言等技能标签的匹配。',
-  projects: '重点突出简历中与 JD 描述业务场景最相关的项目。',
+  experience: '打招呼时重点突出简历与JD在年限、行业背景、岗位类型上的匹配。',
+  skills: '打招呼时重点突出简历与JD在技术栈、工具、语言上的匹配。',
+  projects: '打招呼时重点突出简历与JD在业务场景、项目方向上的匹配。',
 };
 
-const SYSTEM_PROMPT = `你是一个专业的求职助手。根据用户的简历和职位描述，生成一段简短的招呼语，并评估匹配度。
+function buildSystemPrompt(focus: FocusOption): string {
+  const fi = FOCUS_INSTRUCTIONS[focus];
+  const focusLine = fi ? `\n${fi}` : '';
 
-你必须严格返回以下JSON格式，不要包含任何其他内容：
-{"greeting":"招呼语内容","score":85,"scoreReason":"一句话说明匹配/不匹配的关键点"}
+  return `你是招聘求职助手。基于简历和JD，输出一个JSON对象，不要输出任何其他内容。
 
-要求：
-1. greeting: 50-150字，语气专业但不生硬，突出简历与JD的匹配点，不用"您好，我是XXX"开头
-2. score: 0-100的整数，综合评估技能、经验、学历、行业匹配度
-3. scoreReason: 一句话，说明打分的核心依据（关键优势或明显短板）
-4. 不要编造简历里没有的内容`;
-
-export function buildSystemPrompt(focus: FocusOption): string {
-  const instruction = FOCUS_INSTRUCTIONS[focus];
-  if (!instruction) return SYSTEM_PROMPT;
-  return `${SYSTEM_PROMPT}\n\n${instruction}`;
+{
+  "greeting": "招呼语文字",
+  "score": 85,
+  "scoreReason": "关键匹配点或明显短板"
 }
 
-export function buildUserPrompt(resumeText: string, jdText: string, focus: FocusOption): string {
+字段说明：
+- greeting: 用于Boss直聘首次沟通的招呼语,50-150字,语气专业自然
+- score: 0-100整数,综合技能/经验/学历匹配度
+- scoreReason: 一句话核心依据${focusLine}
+
+只输出JSON,不要markdown代码块,不要解释。`;
+}
+
+function buildUserPrompt(resumeText: string, jdText: string, focus: FocusOption): string {
   const labels: Record<FocusOption, string> = {
     none: '通用',
     experience: '经验匹配',
@@ -32,12 +35,13 @@ export function buildUserPrompt(resumeText: string, jdText: string, focus: Focus
     projects: '项目经历',
   };
 
-  return `## 我的简历
-${resumeText || '（未提供简历）'}
+  return `简历：
+${resumeText || '（未提供）'}
 
-## 职位描述
+JD：
 ${jdText}
 
-## 侧重点
-${labels[focus]}`;
+侧重点：${labels[focus]}`;
 }
+
+export { buildSystemPrompt, buildUserPrompt };
