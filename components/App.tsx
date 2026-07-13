@@ -1,9 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
 import type { FocusOption, GenerateGreetingResponse } from '@/lib/types';
 
-const GREETING_CACHE_KEY = 'ga_greeting';
+const CACHE_KEY = 'ga_greeting';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -16,34 +16,28 @@ export default function App() {
   const { toast, showToast, clearToast } = useToast();
 
   useEffect(() => {
-    chrome.storage.local.get('deepseekApiKey').then((result) => {
-      setNeedsSetup(!result.deepseekApiKey);
+    chrome.storage.local.get('deepseekApiKey').then((r) => {
+      setNeedsSetup(!r.deepseekApiKey);
     });
-
-    // 恢复跨页面缓存
     try {
-      const cached = sessionStorage.getItem(GREETING_CACHE_KEY);
-      if (cached) {
-        setGreeting(cached);
-        setStatus('ready');
-        // 尝试自动填入
-        tryFill(cached);
-      }
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached) { setGreeting(cached); setStatus('ready'); tryFill(cached); }
     } catch {}
   }, []);
 
-  // 持续尝试自动填入（聊天输入框可能在 iframe 里）
+  // 只在主文档尝试自动填入（不碰 iframe）
   useEffect(() => {
     if (status !== 'ready' || !greeting) return;
 
     let attempts = 0;
     const interval = setInterval(() => {
       if (attempts++ >= 30) { clearInterval(interval); return; }
-      const ok = tryFill(greeting);
-      if (ok) clearInterval(interval);
+      if (tryFill(greeting)) clearInterval(interval);
     }, 1000);
 
-    const observer = new MutationObserver(() => tryFill(greeting));
+    const observer = new MutationObserver(() => {
+      if (tryFill(greeting)) clearInterval(interval);
+    });
     observer.observe(document.body, { childList: true, subtree: true });
 
     return () => { clearInterval(interval); observer.disconnect(); };
@@ -60,7 +54,7 @@ export default function App() {
       const jdText = extractJD();
 
       if (!jdText) {
-        setDebug('❌ 未检测到职位描述');
+        setDebug('❌ 未检测到职位描述，请在职位详情页使用');
         setStatus('error');
         return;
       }
@@ -82,10 +76,10 @@ export default function App() {
       setDebug('');
       setStatus('ready');
 
-      try { sessionStorage.setItem(GREETING_CACHE_KEY, text); } catch {}
+      try { sessionStorage.setItem(CACHE_KEY, text); } catch {}
       tryFill(text);
     } catch (err) {
-      setDebug('❌ ' + (err instanceof Error ? err.message : '未知错误'));
+      setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
     }
   }, []);
@@ -94,7 +88,7 @@ export default function App() {
     if (!greeting) return;
     const ok = await copyText(greeting);
     setCopied(ok);
-    showToast(ok ? '✅ 已复制，请粘贴到聊天框 (Ctrl+V)' : '复制失败，请手动选中文字', ok ? 'success' : 'error');
+    showToast(ok ? '✅ 已复制，Ctrl+V 粘贴到聊天框' : '复制失败', ok ? 'success' : 'error');
   }, [greeting, showToast]);
 
   return (
@@ -135,7 +129,7 @@ export default function App() {
               background: copied ? '#16a34a' : '#22c55e', color: '#fff',
             }}
           >
-            {copied ? '✅ 已复制 — 请 Ctrl+V 粘贴到聊天框' : '📋 复制招呼语'}
+            {copied ? '✅ 已复制 — Ctrl+V 粘贴到聊天框' : '📋 复制招呼语'}
           </button>
         </div>
       )}
@@ -144,73 +138,38 @@ export default function App() {
   );
 }
 
-// ---- 工具 ----
-
 function tryFill(text: string): boolean {
-  // 尝试主页面
-  let el = findChatInput(document);
-  if (el) return doFill(el, text);
-
-  // 尝试 iframe
-  const iframes = document.querySelectorAll('iframe');
-  for (const iframe of iframes) {
-    try {
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (doc) {
-        el = findChatInput(doc);
-        if (el) return doFill(el, text);
-      }
-    } catch {}
-  }
-
-  return false;
-}
-
-function findChatInput(doc: Document): HTMLElement | null {
-  // textarea（优先）
-  const textareas = doc.querySelectorAll('textarea');
-  for (const el of textareas) {
-    const htmlEl = el as HTMLElement;
-    if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) return htmlEl;
-  }
-
-  // contenteditable
-  const editables = doc.querySelectorAll('[contenteditable="true"], [contenteditable=""]');
-  for (const el of editables) {
-    const htmlEl = el as HTMLElement;
-    if (htmlEl.offsetHeight > 20) return htmlEl;
-  }
-
-  return null;
-}
-
-function doFill(el: HTMLElement, text: string): boolean {
+  const el = findChatInput();
+  if (!el) return false;
   try {
     el.focus();
-
     if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-      const nativeSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype, 'value',
-      )?.set;
-      if (nativeSetter) nativeSetter.call(el, text);
-      else el.value = text;
+      const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (ns) ns.call(el, text); else el.value = text;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
     }
-
-    // contenteditable
     el.textContent = '';
     el.focus();
     const ok = document.execCommand('insertText', false, text);
-    if (!ok) {
-      el.textContent = text;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    if (!ok) { el.textContent = text; el.dispatchEvent(new Event('input', { bubbles: true })); }
     return true;
-  } catch {
-    return false;
+  } catch { return false; }
+}
+
+function findChatInput(): HTMLElement | null {
+  const textareas = document.querySelectorAll('textarea');
+  for (const el of textareas) {
+    const he = el as HTMLElement;
+    if (he.offsetHeight > 20 && he.offsetWidth > 50) return he;
   }
+  const editables = document.querySelectorAll('[contenteditable="true"]');
+  for (const el of editables) {
+    const he = el as HTMLElement;
+    if (he.offsetHeight > 20) return he;
+  }
+  return null;
 }
 
 async function copyText(text: string): Promise<boolean> {

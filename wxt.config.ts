@@ -22,7 +22,6 @@ export default defineConfig({
         js: ['bypass-debugger.js'],
         world: 'MAIN' as const,
         run_at: 'document_start' as const,
-        all_frames: true,
       },
     ],
     action: {

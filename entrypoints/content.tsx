@@ -3,7 +3,6 @@ import App from '@/components/App';
 
 export default defineContentScript({
   matches: ['*://*.zhipin.com/*'],
-  allFrames: true,
   async main() {
     await ensureBody();
     injectUI();
@@ -25,13 +24,13 @@ function injectUI() {
   container.id = 'greeting-agent-root';
 
   const chatBtn = findElement('立即沟通');
-  const chatInput = findChatInput(document);
+  const chatInput = findChatInput();
 
   if (chatInput) {
-    container.style.cssText = 'position:relative;margin-bottom:8px;';
+    container.style.cssText = 'position:relative;margin-bottom:8px;z-index:999999;';
     chatInput.parentElement?.insertBefore(container, chatInput);
   } else if (chatBtn) {
-    container.style.cssText = 'display:inline-flex;position:relative;margin-left:8px;vertical-align:middle;';
+    container.style.cssText = 'display:inline-flex;position:relative;margin-left:8px;vertical-align:middle;z-index:999999;';
     chatBtn.parentElement?.insertBefore(container, chatBtn.nextSibling);
   } else {
     container.style.cssText = 'position:fixed;bottom:100px;right:20px;z-index:999999;';
@@ -59,13 +58,13 @@ function findElement(text: string): HTMLElement | null {
   return null;
 }
 
-function findChatInput(doc: Document): HTMLElement | null {
-  const textareas = doc.querySelectorAll('textarea');
+function findChatInput(): HTMLElement | null {
+  const textareas = document.querySelectorAll('textarea');
   for (const el of textareas) {
     const htmlEl = el as HTMLElement;
     if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) return htmlEl;
   }
-  const editables = doc.querySelectorAll('[contenteditable="true"]');
+  const editables = document.querySelectorAll('[contenteditable="true"]');
   for (const el of editables) {
     const htmlEl = el as HTMLElement;
     if (htmlEl.offsetHeight > 20) return htmlEl;
