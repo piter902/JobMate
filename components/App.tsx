@@ -25,18 +25,17 @@ export default function App() {
     } catch {}
   }, []);
 
-  // 只在主文档尝试自动填入（不碰 iframe）
+  // 自动填入（主文档 + 同源 iframe）
   useEffect(() => {
     if (status !== 'ready' || !greeting) return;
-
     let attempts = 0;
     const interval = setInterval(() => {
-      if (attempts++ >= 30) { clearInterval(interval); return; }
+      if (attempts++ >= 60) { clearInterval(interval); return; }
       if (tryFill(greeting)) clearInterval(interval);
     }, 1000);
 
     const observer = new MutationObserver(() => {
-      if (tryFill(greeting)) clearInterval(interval);
+      tryFill(greeting) && clearInterval(interval);
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
@@ -52,15 +51,13 @@ export default function App() {
     try {
       const { extractJD } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
-
       if (!jdText) {
-        setDebug('❌ 未检测到职位描述，请在职位详情页使用');
+        setDebug('❌ 未检测到职位描述');
         setStatus('error');
         return;
       }
 
       setDebug('⏳ 调用 DeepSeek...');
-
       const response = (await chrome.runtime.sendMessage({
         type: 'GENERATE_GREETING', jdText, focus,
       })) as GenerateGreetingResponse;
@@ -75,9 +72,10 @@ export default function App() {
       setGreeting(text);
       setDebug('');
       setStatus('ready');
-
       try { sessionStorage.setItem(CACHE_KEY, text); } catch {}
-      tryFill(text);
+
+      // 立即尝试填入
+      if (tryFill(text)) setDebug('✅ 已自动填入');
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
@@ -88,7 +86,7 @@ export default function App() {
     if (!greeting) return;
     const ok = await copyText(greeting);
     setCopied(ok);
-    showToast(ok ? '✅ 已复制，Ctrl+V 粘贴到聊天框' : '复制失败', ok ? 'success' : 'error');
+    showToast(ok ? '✅ 已复制，Ctrl+V 粘贴' : '复制失败', ok ? 'success' : 'error');
   }, [greeting, showToast]);
 
   return (
@@ -101,7 +99,7 @@ export default function App() {
       />
       {debug && (
         <div style={{
-          fontSize: 12, marginTop: 4, maxWidth: 280, lineHeight: 1.4,
+          fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           color: debug.startsWith('❌') ? '#dc2626' : '#2563eb',
           wordBreak: 'break-all',
@@ -115,20 +113,14 @@ export default function App() {
           background: '#f0fdf4', border: '2px solid #4ade80',
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
         }}>
-          <div style={{
-            fontSize: 14, lineHeight: 1.7, color: '#1f2937',
-            marginBottom: 12, whiteSpace: 'pre-wrap',
-          }}>
+          <div style={{ fontSize: 14, lineHeight: 1.7, color: '#1f2937', marginBottom: 12, whiteSpace: 'pre-wrap' }}>
             {greeting}
           </div>
-          <button
-            onClick={handleCopy}
-            style={{
-              width: '100%', padding: '10px 0', fontSize: 15, fontWeight: 600,
-              borderRadius: 6, border: 'none', cursor: 'pointer',
-              background: copied ? '#16a34a' : '#22c55e', color: '#fff',
-            }}
-          >
+          <button onClick={handleCopy} style={{
+            width: '100%', padding: '10px 0', fontSize: 15, fontWeight: 600,
+            borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: copied ? '#16a34a' : '#22c55e', color: '#fff',
+          }}>
             {copied ? '✅ 已复制 — Ctrl+V 粘贴到聊天框' : '📋 复制招呼语'}
           </button>
         </div>
@@ -138,33 +130,36 @@ export default function App() {
   );
 }
 
+// ---- 填入逻辑（主文档 + 同源 iframe）----
+
 function tryFill(text: string): boolean {
-  const el = findChatInput();
-  if (!el) return false;
-  try {
-    el.focus();
-    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-      const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      if (ns) ns.call(el, text); else el.value = text;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
+  // 1. 先找主文档
+  let el = findChatInput(document);
+  if (el) return doFill(el, text);
+
+  // 2. 遍历同源 iframe
+  const iframes = document.querySelectorAll('iframe');
+  for (const iframe of iframes) {
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) continue;
+      el = findChatInput(doc);
+      if (el) return doFill(el, text);
+    } catch {
+      // 跨域 iframe，跳过
     }
-    el.textContent = '';
-    el.focus();
-    const ok = document.execCommand('insertText', false, text);
-    if (!ok) { el.textContent = text; el.dispatchEvent(new Event('input', { bubbles: true })); }
-    return true;
-  } catch { return false; }
+  }
+
+  return false;
 }
 
-function findChatInput(): HTMLElement | null {
-  const textareas = document.querySelectorAll('textarea');
+function findChatInput(doc: Document): HTMLElement | null {
+  const textareas = doc.querySelectorAll('textarea');
   for (const el of textareas) {
     const he = el as HTMLElement;
     if (he.offsetHeight > 20 && he.offsetWidth > 50) return he;
   }
-  const editables = document.querySelectorAll('[contenteditable="true"]');
+  const editables = doc.querySelectorAll('[contenteditable="true"]');
   for (const el of editables) {
     const he = el as HTMLElement;
     if (he.offsetHeight > 20) return he;
@@ -172,12 +167,30 @@ function findChatInput(): HTMLElement | null {
   return null;
 }
 
+function doFill(el: HTMLElement, text: string): boolean {
+  try {
+    el.focus();
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+      const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (ns) ns.call(el, text); else el.value = text;
+    } else {
+      el.textContent = '';
+      document.execCommand('insertText', false, text);
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function copyText(text: string): Promise<boolean> {
   try { await navigator.clipboard.writeText(text); return true; } catch {}
   try {
     const ta = document.createElement('textarea');
     ta.value = text;
-    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
     document.body.appendChild(ta);
     ta.select();
     document.execCommand('copy');
