@@ -24,15 +24,23 @@ function injectUI() {
   container.id = 'greeting-agent-root';
 
   const chatBtn = findElement('立即沟通');
-  const chatInput = findChatInput();
+  const isChatPage = !!findChatInput();
 
-  if (chatInput) {
-    container.style.cssText = 'position:relative;margin-bottom:8px;z-index:999999;';
-    chatInput.parentElement?.insertBefore(container, chatInput);
+  if (isChatPage) {
+    // 聊天页面：固定在顶部
+    container.style.cssText = [
+      'position:fixed', 'top:60px', 'left:50%', 'transform:translateX(-50%)',
+      'z-index:999999', 'background:#fff', 'padding:12px 16px',
+      'border-radius:12px', 'box-shadow:0 2px 16px rgba(0,0,0,0.12)',
+    ].join(';');
+    document.body.appendChild(container);
   } else if (chatBtn) {
-    container.style.cssText = 'display:inline-flex;position:relative;margin-left:8px;vertical-align:middle;z-index:999999;';
+    // 职位详情页：放在立即沟通按钮旁
+    container.style.cssText =
+      'display:inline-flex;position:relative;margin-left:8px;vertical-align:middle;z-index:999999;';
     chatBtn.parentElement?.insertBefore(container, chatBtn.nextSibling);
   } else {
+    // 兜底
     container.style.cssText = 'position:fixed;bottom:100px;right:20px;z-index:999999;';
     document.body.appendChild(container);
   }
@@ -63,11 +71,6 @@ function findChatInput(): HTMLElement | null {
   for (const el of textareas) {
     const htmlEl = el as HTMLElement;
     if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) return htmlEl;
-  }
-  const editables = document.querySelectorAll('[contenteditable="true"]');
-  for (const el of editables) {
-    const htmlEl = el as HTMLElement;
-    if (htmlEl.offsetHeight > 20) return htmlEl;
   }
   return null;
 }
