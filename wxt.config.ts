@@ -1,7 +1,15 @@
 import { defineConfig } from 'wxt';
+import { resolve } from 'path';
 
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  vite: () => ({
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, '.'),
+      },
+    },
+  }),
   manifest: {
     name: '智能招呼语助手',
     description: '在Boss直聘上根据JD和简历自动生成个性化招呼语',
