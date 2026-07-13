@@ -19,28 +19,12 @@ export default function App() {
     chrome.storage.local.get('deepseekApiKey').then((r) => {
       setNeedsSetup(!r.deepseekApiKey);
     });
+    // 恢复缓存
     try {
       const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cached) { setGreeting(cached); setStatus('ready'); tryFill(cached); }
+      if (cached) { setGreeting(cached); setStatus('ready'); }
     } catch {}
   }, []);
-
-  // 自动填入（主文档 + 同源 iframe）
-  useEffect(() => {
-    if (status !== 'ready' || !greeting) return;
-    let attempts = 0;
-    const interval = setInterval(() => {
-      if (attempts++ >= 60) { clearInterval(interval); return; }
-      if (tryFill(greeting)) clearInterval(interval);
-    }, 1000);
-
-    const observer = new MutationObserver(() => {
-      tryFill(greeting) && clearInterval(interval);
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    return () => { clearInterval(interval); observer.disconnect(); };
-  }, [status, greeting]);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setDebug('⏳ 提取JD...');
@@ -52,7 +36,7 @@ export default function App() {
       const { extractJD } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
       if (!jdText) {
-        setDebug('❌ 未检测到职位描述');
+        setDebug('❌ 未检测到职位描述，请在职位详情页使用');
         setStatus('error');
         return;
       }
@@ -70,12 +54,16 @@ export default function App() {
 
       const text = response.greeting!;
       setGreeting(text);
-      setDebug('');
+      setDebug('✅ 生成完成');
       setStatus('ready');
       try { sessionStorage.setItem(CACHE_KEY, text); } catch {}
 
-      // 立即尝试填入
-      if (tryFill(text)) setDebug('✅ 已自动填入');
+      // 自动复制
+      const ok = await copyText(text);
+      if (ok) {
+        setCopied(true);
+        setTimeout(() => setDebug('✅ 已复制到剪贴板，Ctrl+V 粘贴'), 500);
+      }
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
@@ -86,7 +74,7 @@ export default function App() {
     if (!greeting) return;
     const ok = await copyText(greeting);
     setCopied(ok);
-    showToast(ok ? '✅ 已复制，Ctrl+V 粘贴' : '复制失败', ok ? 'success' : 'error');
+    showToast(ok ? '✅ 已复制' : '复制失败', ok ? 'success' : 'error');
   }, [greeting, showToast]);
 
   return (
@@ -101,7 +89,8 @@ export default function App() {
         <div style={{
           fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          color: debug.startsWith('❌') ? '#dc2626' : '#2563eb',
+          color: debug.startsWith('❌') ? '#dc2626' :
+            debug.startsWith('✅') ? '#16a34a' : '#2563eb',
           wordBreak: 'break-all',
         }}>
           {debug}
@@ -128,61 +117,6 @@ export default function App() {
       <Toast toast={toast} onDone={clearToast} />
     </div>
   );
-}
-
-// ---- 填入逻辑（主文档 + 同源 iframe）----
-
-function tryFill(text: string): boolean {
-  // 1. 先找主文档
-  let el = findChatInput(document);
-  if (el) return doFill(el, text);
-
-  // 2. 遍历同源 iframe
-  const iframes = document.querySelectorAll('iframe');
-  for (const iframe of iframes) {
-    try {
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!doc) continue;
-      el = findChatInput(doc);
-      if (el) return doFill(el, text);
-    } catch {
-      // 跨域 iframe，跳过
-    }
-  }
-
-  return false;
-}
-
-function findChatInput(doc: Document): HTMLElement | null {
-  const textareas = doc.querySelectorAll('textarea');
-  for (const el of textareas) {
-    const he = el as HTMLElement;
-    if (he.offsetHeight > 20 && he.offsetWidth > 50) return he;
-  }
-  const editables = doc.querySelectorAll('[contenteditable="true"]');
-  for (const el of editables) {
-    const he = el as HTMLElement;
-    if (he.offsetHeight > 20) return he;
-  }
-  return null;
-}
-
-function doFill(el: HTMLElement, text: string): boolean {
-  try {
-    el.focus();
-    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-      const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      if (ns) ns.call(el, text); else el.value = text;
-    } else {
-      el.textContent = '';
-      document.execCommand('insertText', false, text);
-    }
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function copyText(text: string): Promise<boolean> {
