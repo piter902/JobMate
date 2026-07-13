@@ -1,5 +1,6 @@
 import { generateGreeting, validateApiKey } from '@/lib/deepseek';
 import { storage } from '@/lib/storage';
+import { track } from '@/lib/analytics';
 import type { GenerateGreetingRequest, ValidateApiKeyRequest } from '@/lib/types';
 
 export default defineBackground(() => {
@@ -22,8 +23,17 @@ async function handleMessage(message: unknown) {
         }
         const { text: resumeText } = await storage.getResume();
         const result = await generateGreeting({ apiKey, resumeText, jdText, focus });
+
+        track('greeting_generated', {
+          focus,
+          score: result.score,
+          jdLength: jdText.length,
+          hasResume: resumeText.length > 0,
+        });
+
         return { type: 'GENERATE_GREETING_RESULT', result };
       } catch (err) {
+        track('greeting_error', { error: (err as Error).message });
         const errorMessage = err instanceof Error ? err.message : '生成失败，请重试';
         return { type: 'GENERATE_GREETING_RESULT', error: errorMessage };
       }

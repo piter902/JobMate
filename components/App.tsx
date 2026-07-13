@@ -3,6 +3,7 @@ import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
 import type { FocusOption, GenerateGreetingResponse, GreetingResult } from '@/lib/types';
 
+import { track } from '@/lib/analytics';
 const CACHE_KEY = 'ga_result';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
@@ -27,12 +28,12 @@ export default function App() {
     chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
     try {
       const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); }
+      if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); track('greeting_button_clicked', { focus }); }
     } catch {}
   }, []);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
-    setCollapsed(false);
+    setCollapsed(false); track('greeting_button_clicked', { focus });
     setDebug('⏳ 分析中...');
     setStatus('loading');
     setResult(null);
