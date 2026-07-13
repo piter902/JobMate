@@ -2,10 +2,10 @@
 export type FocusOption = 'none' | 'experience' | 'skills' | 'projects';
 
 export const FOCUS_LABELS: Record<FocusOption, string> = {
-  none: '无侧重',
-  experience: '侧重经验匹配',
-  skills: '侧重技能',
-  projects: '侧重项目经历',
+  none: '通用',
+  experience: '经验匹配',
+  skills: '技能',
+  projects: '项目经历',
 };
 
 export interface GenerateGreetingRequest {

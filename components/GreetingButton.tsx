@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { FocusOption } from '@/lib/types';
 import { FOCUS_LABELS } from '@/lib/types';
 
@@ -8,47 +9,58 @@ interface GreetingButtonProps {
   disabledReason?: string;
 }
 
-const FOCUS_OPTIONS: FocusOption[] = ['none', 'skills', 'experience', 'projects'];
+const OPTIONS: FocusOption[] = ['none', 'skills', 'experience', 'projects'];
 
 export function GreetingButton({ onGenerate, loading, disabled, disabledReason }: GreetingButtonProps) {
+  const [selected, setSelected] = useState<FocusOption>('none');
+
+  const handleClick = (opt: FocusOption) => {
+    setSelected(opt);
+    onGenerate(opt);
+  };
+
   return (
     <div style={{
-      display: 'inline-flex', flexDirection: 'column', gap: 4,
+      display: 'inline-flex', flexDirection: 'column', gap: 6,
       fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+      userSelect: 'none',
     }}>
-      <button
-        onClick={() => onGenerate('none')}
-        disabled={disabled || loading}
-        title={disabledReason}
-        style={{
-          padding: '6px 14px', border: '2px solid #5ebb8a',
-          borderRadius: 6, background: loading ? '#f0faf5' : '#5ebb8a',
-          color: loading ? '#5ebb8a' : '#fff', fontSize: 14, fontWeight: 600,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.5 : 1, whiteSpace: 'nowrap',
-        }}
-      >
-        {loading ? '⏳ 生成中...' : '🤖 生成招呼语'}
-      </button>
-      {!disabled && (
-        <div style={{ display: 'flex', gap: 4 }}>
-          {FOCUS_OPTIONS.filter(o => o !== 'none').map((opt) => (
+      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 500 }}>
+        生成招呼语
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {OPTIONS.map((opt) => {
+          const isPrimary = opt === 'none';
+          const isActive = selected === opt && loading;
+          return (
             <button
               key={opt}
-              onClick={() => onGenerate(opt)}
-              disabled={loading}
+              onClick={() => handleClick(opt)}
+              disabled={disabled || loading}
+              title={disabled ? disabledReason : undefined}
               style={{
-                padding: '3px 8px', border: '1px solid #d1d5db',
-                borderRadius: 4, background: '#fff', color: '#6b7280',
-                fontSize: 11, cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.5 : 1, whiteSpace: 'nowrap',
+                padding: '6px 12px',
+                border: isPrimary ? '2px solid #5ebb8a' : '1px solid #d1d5db',
+                borderRadius: 6,
+                background: loading
+                  ? (isActive ? '#e6f7ed' : '#f9fafb')
+                  : (isPrimary ? '#5ebb8a' : '#fff'),
+                color: loading
+                  ? (isActive ? '#5ebb8a' : '#9ca3af')
+                  : (isPrimary ? '#fff' : '#374151'),
+                fontSize: 13,
+                fontWeight: isPrimary ? 600 : 400,
+                cursor: disabled || loading ? 'not-allowed' : 'pointer',
+                opacity: disabled ? 0.5 : 1,
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s',
               }}
             >
-              {FOCUS_LABELS[opt].replace('侧重', '')}
+              {loading && isActive ? '⏳' : ''} {FOCUS_LABELS[opt]}
             </button>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 }
