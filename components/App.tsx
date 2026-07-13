@@ -88,7 +88,7 @@ export default function App() {
           boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}
-        title="展开招呼语助手"
+        title="展开"
       >
         🤖
       </button>
@@ -97,18 +97,17 @@ export default function App() {
 
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
-      {/* 标题栏 + 收起按钮 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ fontSize: 12, color: '#9ca3af' }}>招呼语助手</span>
         <button
           onClick={() => setCollapsed(true)}
           style={{
-            background: 'none', border: 'none', color: '#9ca3af',
-            fontSize: 16, cursor: 'pointer', padding: 0, lineHeight: 1,
+            background: 'none', border: '1px solid #e5e7eb', borderRadius: 4,
+            color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           }}
-          title="收起"
         >
-          −
+          收起
         </button>
       </div>
       <GreetingButton
