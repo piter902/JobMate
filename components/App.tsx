@@ -8,6 +8,7 @@ const CACHE_KEY = 'ga_result';
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
 function scoreColor(s: number): string {
+  if (s < 0) return '#9ca3af';
   if (s >= 80) return '#16a34a';
   if (s >= 60) return '#f59e0b';
   return '#dc2626';
@@ -23,9 +24,7 @@ export default function App() {
   const { toast, showToast, clearToast } = useToast();
 
   useEffect(() => {
-    chrome.storage.local.get('deepseekApiKey').then((r) => {
-      setNeedsSetup(!r.deepseekApiKey);
-    });
+    chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
     try {
       const cached = sessionStorage.getItem(CACHE_KEY);
       if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); }
@@ -42,22 +41,14 @@ export default function App() {
     try {
       const { extractJD } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
-      if (!jdText) {
-        setDebug('❌ 未检测到职位描述');
-        setStatus('error');
-        return;
-      }
+      if (!jdText) { setDebug('❌ 未检测到职位描述'); setStatus('error'); return; }
 
-      setDebug('⏳ 匹配度分析 + 生成招呼语...');
+      setDebug('⏳ 分析匹配度...');
       const response = (await chrome.runtime.sendMessage({
         type: 'GENERATE_GREETING', jdText, focus,
       })) as GenerateGreetingResponse;
 
-      if (response.error) {
-        setDebug('❌ ' + response.error);
-        setStatus('error');
-        return;
-      }
+      if (response.error) { setDebug('❌ ' + response.error); setStatus('error'); return; }
 
       const r = response.result!;
       setResult(r);
@@ -66,10 +57,7 @@ export default function App() {
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
 
       const ok = await copyText(r.greeting);
-      if (ok) {
-        setCopied(true);
-        showToast('✅ 已复制，Ctrl+V 粘贴', 'success');
-      }
+      if (ok) { setCopied(true); showToast('✅ 已复制，Ctrl+V 粘贴', 'success'); }
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
@@ -86,18 +74,16 @@ export default function App() {
   if (collapsed) {
     return (
       <button onClick={() => setCollapsed(false)} style={{
-        width: 40, height: 40, borderRadius: '50%',
-        background: '#5ebb8a', color: '#fff', border: 'none',
-        fontSize: 18, cursor: 'pointer',
+        width: 40, height: 40, borderRadius: '50%', background: '#5ebb8a',
+        color: '#fff', border: 'none', fontSize: 18, cursor: 'pointer',
         boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        🤖
-      </button>
+      }}>🤖</button>
     );
   }
 
-  const s = result?.score ?? 0;
+  const s = result?.score ?? -1;
+  const valid = s >= 0;
 
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
@@ -107,73 +93,53 @@ export default function App() {
           background: 'none', border: '1px solid #e5e7eb', borderRadius: 4,
           color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px',
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-        }}>
-          收起
-        </button>
+        }}>收起</button>
       </div>
       <GreetingButton
-        onGenerate={handleGenerate}
-        loading={status === 'loading'}
-        disabled={needsSetup}
-        disabledReason={needsSetup ? '请先设置 API Key' : undefined}
+        onGenerate={handleGenerate} loading={status === 'loading'}
+        disabled={needsSetup} disabledReason={needsSetup ? '请先设置 API Key' : undefined}
       />
       {debug && (
-        <div style={{
-          fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4,
+        <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          color: debug.startsWith('❌') ? '#dc2626' : '#2563eb',
-        }}>
-          {debug}
-        </div>
+          color: debug.startsWith('❌') ? '#dc2626' : '#2563eb' }}>{debug}</div>
       )}
       {result && status === 'ready' && (
-        <div style={{
-          marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340,
+        <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340,
           background: '#fff', border: '1px solid #e5e7eb',
-          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-        }}>
-          {/* 匹配度 + 进度条 */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
+          {/* 匹配度 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
             padding: '8px 12px', borderRadius: 6,
-            background: s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2',
-          }}>
+            background: valid ? (s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2') : '#f9fafb' }}>
             <span style={{ fontSize: 12, color: '#6b7280' }}>匹配度</span>
             <span style={{ fontSize: 24, fontWeight: 700, color: scoreColor(s), lineHeight: 1 }}>
-              {s}
+              {valid ? s : '—'}
             </span>
-            <span style={{ fontSize: 12, color: '#9ca3af' }}>/100</span>
-            <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}>
-              <div style={{
-                width: `${s}%`, height: '100%', borderRadius: 3,
-                background: scoreColor(s), transition: 'width 0.5s',
-              }} />
-            </div>
+            {valid && <span style={{ fontSize: 12, color: '#9ca3af' }}>/100</span>}
+            {valid && (
+              <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}>
+                <div style={{ width: `${s}%`, height: '100%', borderRadius: 3,
+                  background: scoreColor(s), transition: 'width 0.5s' }} />
+              </div>
+            )}
           </div>
           {/* 评分理由 */}
           {result.scoreReason && (
-            <div style={{
-              fontSize: 11, color: '#6b7280', marginBottom: 10,
-              lineHeight: 1.5, padding: '6px 8px', borderRadius: 4,
-              background: '#f9fafb',
-            }}>
+            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, lineHeight: 1.5,
+              padding: '6px 8px', borderRadius: 4, background: '#f9fafb' }}>
               💡 {result.scoreReason}
             </div>
           )}
           {/* 招呼语 */}
-          <div style={{
-            fontSize: 13, lineHeight: 1.7, color: '#1f2937',
-            marginBottom: 10, whiteSpace: 'pre-wrap',
-          }}>
+          <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>
             {result.greeting}
           </div>
           <button onClick={handleCopy} style={{
             width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600,
             borderRadius: 6, border: 'none', cursor: 'pointer',
             background: copied ? '#16a34a' : '#22c55e', color: '#fff',
-          }}>
-            {copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}
-          </button>
+          }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>
         </div>
       )}
       <Toast toast={toast} onDone={clearToast} />
