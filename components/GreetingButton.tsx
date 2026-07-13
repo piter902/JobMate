@@ -1,4 +1,3 @@
-import { useState, useRef, useEffect } from 'react';
 import type { FocusOption } from '@/lib/types';
 import { FOCUS_LABELS } from '@/lib/types';
 
@@ -9,75 +8,44 @@ interface GreetingButtonProps {
   disabledReason?: string;
 }
 
+const FOCUS_OPTIONS: FocusOption[] = ['none', 'skills', 'experience', 'projects'];
+
 export function GreetingButton({ onGenerate, loading, disabled, disabledReason }: GreetingButtonProps) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, []);
-
-  const focusOptions: FocusOption[] = ['none', 'skills', 'experience', 'projects'];
-
   return (
-    <div ref={ref} style={{ display: 'inline-flex', alignItems: 'center', position: 'relative' }}>
+    <div style={{
+      display: 'inline-flex', flexDirection: 'column', gap: 4,
+      fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+    }}>
       <button
         onClick={() => onGenerate('none')}
         disabled={disabled || loading}
-        title={disabled ? disabledReason : undefined}
+        title={disabledReason}
         style={{
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-          padding: '0 16px', height: 36,
-          border: '1px solid #5ebb8a', borderRadius: '4px 0 0 4px',
-          background: loading ? '#f0faf5' : '#5ebb8a',
-          color: loading ? '#5ebb8a' : '#fff',
-          fontSize: 14, cursor: disabled ? 'not-allowed' : 'pointer',
+          padding: '6px 14px', border: '2px solid #5ebb8a',
+          borderRadius: 6, background: loading ? '#f0faf5' : '#5ebb8a',
+          color: loading ? '#5ebb8a' : '#fff', fontSize: 14, fontWeight: 600,
+          cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.5 : 1, whiteSpace: 'nowrap',
-          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
         }}
       >
         {loading ? '⏳ 生成中...' : '🤖 生成招呼语'}
       </button>
-      <button
-        onClick={() => !disabled && setOpen(!open)}
-        disabled={disabled}
-        style={{
-          height: 36, width: 28,
-          border: '1px solid #5ebb8a', borderLeft: 'none',
-          borderRadius: '0 4px 4px 0',
-          background: loading ? '#f0faf5' : '#fff',
-          color: '#5ebb8a', fontSize: 12,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.5 : 1,
-        }}
-      >
-        ▼
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', right: 0, marginTop: 4,
-          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 2147483647,
-          minWidth: 160, overflow: 'hidden',
-        }}>
-          {focusOptions.map((opt) => (
-            <div
+      {!disabled && (
+        <div style={{ display: 'flex', gap: 4 }}>
+          {FOCUS_OPTIONS.filter(o => o !== 'none').map((opt) => (
+            <button
               key={opt}
-              onClick={() => { setOpen(false); onGenerate(opt); }}
+              onClick={() => onGenerate(opt)}
+              disabled={loading}
               style={{
-                padding: '8px 14px', cursor: 'pointer', fontSize: 14,
-                color: '#374151', borderBottom: '1px solid #f3f4f6',
-                fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+                padding: '3px 8px', border: '1px solid #d1d5db',
+                borderRadius: 4, background: '#fff', color: '#6b7280',
+                fontSize: 11, cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.5 : 1, whiteSpace: 'nowrap',
               }}
-              onMouseEnter={(e) => { (e.target as HTMLElement).style.background = '#f0faf5'; }}
-              onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
             >
-              {FOCUS_LABELS[opt]}
-            </div>
+              {FOCUS_LABELS[opt].replace('侧重', '')}
+            </button>
           ))}
         </div>
       )}

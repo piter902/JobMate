@@ -3,6 +3,7 @@ import App from '@/components/App';
 
 export default defineContentScript({
   matches: ['*://*.zhipin.com/*'],
+  allFrames: true,
   async main() {
     await ensureBody();
     injectUI();
@@ -23,24 +24,17 @@ function injectUI() {
   const container = document.createElement('div');
   container.id = 'greeting-agent-root';
 
-  // 判断页面类型，放到合适位置
   const chatBtn = findElement('立即沟通');
-  const chatInput = findChatInput();
+  const chatInput = findChatInput(document);
 
   if (chatInput) {
-    // 聊天页面：放在输入框上方
-    container.style.cssText =
-      'position:relative;margin-bottom:8px;';
+    container.style.cssText = 'position:relative;margin-bottom:8px;';
     chatInput.parentElement?.insertBefore(container, chatInput);
   } else if (chatBtn) {
-    // 职位详情页：放在"立即沟通"按钮旁
-    container.style.cssText =
-      'display:inline-flex;position:relative;margin-left:8px;vertical-align:middle;';
+    container.style.cssText = 'display:inline-flex;position:relative;margin-left:8px;vertical-align:middle;';
     chatBtn.parentElement?.insertBefore(container, chatBtn.nextSibling);
   } else {
-    // 兜底：右下角浮动
-    container.style.cssText =
-      'position:fixed;bottom:100px;right:20px;z-index:999999;';
+    container.style.cssText = 'position:fixed;bottom:100px;right:20px;z-index:999999;';
     document.body.appendChild(container);
   }
 
@@ -59,21 +53,22 @@ function findElement(text: string): HTMLElement | null {
     if ((el.textContent || '').trim() === text) {
       const htmlEl = el as HTMLElement;
       const style = window.getComputedStyle(htmlEl);
-      if (style.display !== 'none' && style.visibility !== 'hidden') {
-        return htmlEl;
-      }
+      if (style.display !== 'none' && style.visibility !== 'hidden') return htmlEl;
     }
   }
   return null;
 }
 
-function findChatInput(): HTMLElement | null {
-  const candidates = document.querySelectorAll('textarea, [contenteditable="true"]');
-  for (const el of candidates) {
+function findChatInput(doc: Document): HTMLElement | null {
+  const textareas = doc.querySelectorAll('textarea');
+  for (const el of textareas) {
     const htmlEl = el as HTMLElement;
-    if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) {
-      return htmlEl;
-    }
+    if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) return htmlEl;
+  }
+  const editables = doc.querySelectorAll('[contenteditable="true"]');
+  for (const el of editables) {
+    const htmlEl = el as HTMLElement;
+    if (htmlEl.offsetHeight > 20) return htmlEl;
   }
   return null;
 }

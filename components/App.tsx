@@ -3,77 +3,57 @@ import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
 import type { FocusOption, GenerateGreetingResponse } from '@/lib/types';
 
-const GREETING_CACHE_KEY = 'greeting_agent_last_greeting';
+const GREETING_CACHE_KEY = 'ga_greeting';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
 export default function App() {
   const [status, setStatus] = useState<Status>('idle');
-  const [error, setError] = useState<string | null>(null);
   const [needsSetup, setNeedsSetup] = useState(true);
   const [debug, setDebug] = useState('');
   const [greeting, setGreeting] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [filled, setFilled] = useState(false);
   const { toast, showToast, clearToast } = useToast();
-  const greetingRef = useRef<string | null>(null);
 
   useEffect(() => {
     chrome.storage.local.get('deepseekApiKey').then((result) => {
-      const hasKey = !!result.deepseekApiKey;
-      setNeedsSetup(!hasKey);
-      if (!hasKey) setDebug('⚠ 未配置 API Key');
+      setNeedsSetup(!result.deepseekApiKey);
     });
 
-    // 恢复缓存
+    // 恢复跨页面缓存
     try {
       const cached = sessionStorage.getItem(GREETING_CACHE_KEY);
       if (cached) {
-        greetingRef.current = cached;
         setGreeting(cached);
         setStatus('ready');
-        tryAutoFill();
+        // 尝试自动填入
+        tryFill(cached);
       }
     } catch {}
   }, []);
 
-  const tryAutoFill = useCallback(() => {
-    if (!greetingRef.current) return;
-    const inputArea = findChatInput();
-    if (inputArea) {
-      const ok = fillInput(inputArea, greetingRef.current);
-      if (ok) {
-        copyToClipboard(greetingRef.current);
-        setFilled(true);
-        setDebug('✅ 已填入');
-        try { sessionStorage.removeItem(GREETING_CACHE_KEY); } catch {}
-        greetingRef.current = null;
-      }
-    }
-  }, []);
-
-  // 持续尝试填入
+  // 持续尝试自动填入（聊天输入框可能在 iframe 里）
   useEffect(() => {
+    if (status !== 'ready' || !greeting) return;
+
     let attempts = 0;
     const interval = setInterval(() => {
-      if (attempts >= 60) { clearInterval(interval); return; }
-      attempts++;
-      tryAutoFill();
+      if (attempts++ >= 30) { clearInterval(interval); return; }
+      const ok = tryFill(greeting);
+      if (ok) clearInterval(interval);
     }, 1000);
 
-    const observer = new MutationObserver(() => tryAutoFill());
+    const observer = new MutationObserver(() => tryFill(greeting));
     observer.observe(document.body, { childList: true, subtree: true });
 
     return () => { clearInterval(interval); observer.disconnect(); };
-  }, [tryAutoFill]);
+  }, [status, greeting]);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setDebug('⏳ 提取JD...');
     setStatus('loading');
-    setError(null);
     setGreeting(null);
     setCopied(false);
-    setFilled(false);
 
     try {
       const { extractJD } = await import('@/lib/jd-extractor');
@@ -81,12 +61,11 @@ export default function App() {
 
       if (!jdText) {
         setDebug('❌ 未检测到职位描述');
-        setError('未检测到职位描述');
         setStatus('error');
         return;
       }
 
-      setDebug('⏳ 调用DeepSeek...');
+      setDebug('⏳ 调用 DeepSeek...');
 
       const response = (await chrome.runtime.sendMessage({
         type: 'GENERATE_GREETING', jdText, focus,
@@ -94,40 +73,29 @@ export default function App() {
 
       if (response.error) {
         setDebug('❌ ' + response.error);
-        setError(response.error);
         setStatus('error');
         return;
       }
 
       const text = response.greeting!;
-      greetingRef.current = text;
       setGreeting(text);
       setDebug('');
       setStatus('ready');
 
       try { sessionStorage.setItem(GREETING_CACHE_KEY, text); } catch {}
-      tryAutoFill();
+      tryFill(text);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '未知错误';
-      setDebug('❌ ' + msg);
-      setError(msg);
+      setDebug('❌ ' + (err instanceof Error ? err.message : '未知错误'));
       setStatus('error');
     }
-  }, [tryAutoFill]);
+  }, []);
 
   const handleCopy = useCallback(async () => {
     if (!greeting) return;
-    const ok = await copyToClipboard(greeting);
-    if (ok) setCopied(true);
-    showToast(ok ? '✅ 已复制' : '复制失败，请手动选中', ok ? 'success' : 'error');
+    const ok = await copyText(greeting);
+    setCopied(ok);
+    showToast(ok ? '✅ 已复制，请粘贴到聊天框 (Ctrl+V)' : '复制失败，请手动选中文字', ok ? 'success' : 'error');
   }, [greeting, showToast]);
-
-  const handleRetryFill = useCallback(() => {
-    if (!greeting) return;
-    greetingRef.current = greeting;
-    setFilled(false);
-    tryAutoFill();
-  }, [greeting, tryAutoFill]);
 
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
@@ -139,42 +107,36 @@ export default function App() {
       />
       {debug && (
         <div style={{
-          fontSize: 12, marginTop: 4, maxWidth: 280, lineHeight: 1.5,
+          fontSize: 12, marginTop: 4, maxWidth: 280, lineHeight: 1.4,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          color: debug.startsWith('❌') ? '#dc2626' : '#2563eb',
           wordBreak: 'break-all',
-          color: debug.startsWith('❌') ? '#dc2626' :
-            debug.startsWith('✅') ? '#16a34a' : '#2563eb',
         }}>
           {debug}
         </div>
       )}
       {greeting && status === 'ready' && (
         <div style={{
-          marginTop: 8, padding: 12, borderRadius: 8,
-          background: '#f0faf5', border: '1px solid #bbf7d0',
-          maxWidth: 320, fontSize: 14, lineHeight: 1.6,
+          marginTop: 8, padding: 14, borderRadius: 8, maxWidth: 340,
+          background: '#f0fdf4', border: '2px solid #4ade80',
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          color: '#374151',
         }}>
-          <div style={{ marginBottom: 8 }}>{greeting}</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleCopy} style={{
-              padding: '4px 12px', fontSize: 12, borderRadius: 4,
-              border: '1px solid #16a34a', background: copied ? '#16a34a' : '#fff',
-              color: copied ? '#fff' : '#16a34a', cursor: 'pointer',
-            }}>
-              {copied ? '✅ 已复制' : '📋 复制'}
-            </button>
-            {!filled && (
-              <button onClick={handleRetryFill} style={{
-                padding: '4px 12px', fontSize: 12, borderRadius: 4,
-                border: '1px solid #2563eb', background: '#fff',
-                color: '#2563eb', cursor: 'pointer',
-              }}>
-                📝 填入输入框
-              </button>
-            )}
+          <div style={{
+            fontSize: 14, lineHeight: 1.7, color: '#1f2937',
+            marginBottom: 12, whiteSpace: 'pre-wrap',
+          }}>
+            {greeting}
           </div>
+          <button
+            onClick={handleCopy}
+            style={{
+              width: '100%', padding: '10px 0', fontSize: 15, fontWeight: 600,
+              borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: copied ? '#16a34a' : '#22c55e', color: '#fff',
+            }}
+          >
+            {copied ? '✅ 已复制 — 请 Ctrl+V 粘贴到聊天框' : '📋 复制招呼语'}
+          </button>
         </div>
       )}
       <Toast toast={toast} onDone={clearToast} />
@@ -182,84 +144,85 @@ export default function App() {
   );
 }
 
-// ---- 工具函数 ----
+// ---- 工具 ----
 
-function findChatInput(): HTMLElement | null {
-  // 先找 textarea
-  const textareas = document.querySelectorAll('textarea');
-  for (const el of textareas) {
-    const htmlEl = el as HTMLElement;
-    if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) {
-      const style = window.getComputedStyle(htmlEl);
-      if (style.display !== 'none' && style.visibility !== 'hidden') {
-        return htmlEl;
+function tryFill(text: string): boolean {
+  // 尝试主页面
+  let el = findChatInput(document);
+  if (el) return doFill(el, text);
+
+  // 尝试 iframe
+  const iframes = document.querySelectorAll('iframe');
+  for (const iframe of iframes) {
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (doc) {
+        el = findChatInput(doc);
+        if (el) return doFill(el, text);
       }
-    }
+    } catch {}
   }
 
-  // 再找 contenteditable
-  const editables = document.querySelectorAll('[contenteditable="true"]');
+  return false;
+}
+
+function findChatInput(doc: Document): HTMLElement | null {
+  // textarea（优先）
+  const textareas = doc.querySelectorAll('textarea');
+  for (const el of textareas) {
+    const htmlEl = el as HTMLElement;
+    if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) return htmlEl;
+  }
+
+  // contenteditable
+  const editables = doc.querySelectorAll('[contenteditable="true"], [contenteditable=""]');
   for (const el of editables) {
     const htmlEl = el as HTMLElement;
-    if (htmlEl.offsetHeight > 20 && htmlEl.offsetWidth > 50) {
-      return htmlEl;
-    }
+    if (htmlEl.offsetHeight > 20) return htmlEl;
   }
 
   return null;
 }
 
-function fillInput(el: HTMLElement, text: string): boolean {
+function doFill(el: HTMLElement, text: string): boolean {
   try {
+    el.focus();
+
     if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-      // 使用原生 setter 绕过 React 受控组件
       const nativeSetter = Object.getOwnPropertyDescriptor(
-        el instanceof HTMLTextAreaElement
-          ? HTMLTextAreaElement.prototype
-          : HTMLInputElement.prototype,
-        'value',
+        HTMLTextAreaElement.prototype, 'value',
       )?.set;
-      if (nativeSetter) {
-        nativeSetter.call(el, text);
-      } else {
-        el.value = text;
-      }
+      if (nativeSetter) nativeSetter.call(el, text);
+      else el.value = text;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
       return true;
     }
 
-    if (el.getAttribute('contenteditable') === 'true' || (el as HTMLElement & { isContentEditable: boolean }).isContentEditable) {
-      el.focus();
-      // 清空并用 execCommand 插入
-      el.textContent = '';
-      document.execCommand('insertText', false, text);
+    // contenteditable
+    el.textContent = '';
+    el.focus();
+    const ok = document.execCommand('insertText', false, text);
+    if (!ok) {
+      el.textContent = text;
       el.dispatchEvent(new Event('input', { bubbles: true }));
-      return true;
     }
-  } catch (e) {
-    console.error('fillInput failed:', e);
-  }
-  return false;
-}
-
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    return true;
+  } catch { return false; }
 }
