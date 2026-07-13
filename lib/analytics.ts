@@ -1,13 +1,7 @@
-// 极简 PostHog 追踪（直接调 /capture API，零依赖）
+// PostHog 追踪（配置写死）
 
-const STORAGE_KEY = 'ph_config';
-
-interface PhConfig { host: string; key: string }
-
-async function getConfig(): Promise<PhConfig | null> {
-  const r = await chrome.storage.local.get(STORAGE_KEY);
-  return r[STORAGE_KEY] || null;
-}
+const PH_HOST = 'https://us.i.posthog.com';
+const PH_KEY = 'phc_pPLeo5PgFqybDGChr54qCBAsyooEuAv2Y8FGUJZxuqot';
 
 async function getDistinctId(): Promise<string> {
   const idKey = 'ph_distinct_id';
@@ -18,31 +12,17 @@ async function getDistinctId(): Promise<string> {
   return id;
 }
 
-/** 发送事件 */
 export async function track(event: string, props?: Record<string, unknown>): Promise<void> {
-  const cfg = await getConfig();
-  if (!cfg) return;
   try {
-    await fetch(`${cfg.host}/capture`, {
+    await fetch(`${PH_HOST}/capture`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_key: cfg.key,
+        api_key: PH_KEY,
         event,
         distinct_id: await getDistinctId(),
         properties: { ...props, $lib: 'greeting-agent' },
       }),
     });
   } catch { /* 不影响主流程 */ }
-}
-
-/** 保存配置 */
-export async function saveConfig(host: string, key: string): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEY]: { host: host.replace(/\/+$/, ''), key } });
-}
-
-/** 读取配置 */
-export async function loadConfig(): Promise<PhConfig> {
-  const r = await chrome.storage.local.get(STORAGE_KEY);
-  return r[STORAGE_KEY] || { host: '', key: '' };
 }
