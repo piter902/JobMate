@@ -1,4 +1,3 @@
-/** 招呼语侧重点选项 */
 export type FocusOption = 'none' | 'experience' | 'skills' | 'projects';
 
 export const FOCUS_LABELS: Record<FocusOption, string> = {
@@ -14,9 +13,15 @@ export interface GenerateGreetingRequest {
   focus: FocusOption;
 }
 
+export interface GreetingResult {
+  greeting: string;
+  score: number;
+  scoreReason: string;
+}
+
 export interface GenerateGreetingResponse {
   type: 'GENERATE_GREETING_RESULT';
-  greeting?: string;
+  result?: GreetingResult;
   error?: string;
 }
 

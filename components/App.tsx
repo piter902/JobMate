@@ -1,17 +1,23 @@
 import { useState, useCallback, useEffect } from 'react';
 import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
-import type { FocusOption, GenerateGreetingResponse } from '@/lib/types';
+import type { FocusOption, GenerateGreetingResponse, GreetingResult } from '@/lib/types';
 
-const CACHE_KEY = 'ga_greeting';
+const CACHE_KEY = 'ga_result';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
+
+function scoreColor(s: number): string {
+  if (s >= 80) return '#16a34a';
+  if (s >= 60) return '#f59e0b';
+  return '#dc2626';
+}
 
 export default function App() {
   const [status, setStatus] = useState<Status>('idle');
   const [needsSetup, setNeedsSetup] = useState(true);
   const [debug, setDebug] = useState('');
-  const [greeting, setGreeting] = useState<string | null>(null);
+  const [result, setResult] = useState<GreetingResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const { toast, showToast, clearToast } = useToast();
@@ -22,15 +28,15 @@ export default function App() {
     });
     try {
       const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cached) { setGreeting(cached); setStatus('ready'); setCollapsed(false); }
+      if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); }
     } catch {}
   }, []);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setCollapsed(false);
-    setDebug('⏳ 提取JD...');
+    setDebug('⏳ 分析中...');
     setStatus('loading');
-    setGreeting(null);
+    setResult(null);
     setCopied(false);
 
     try {
@@ -42,7 +48,7 @@ export default function App() {
         return;
       }
 
-      setDebug('⏳ 调用 DeepSeek...');
+      setDebug('⏳ 匹配度分析 + 生成招呼语...');
       const response = (await chrome.runtime.sendMessage({
         type: 'GENERATE_GREETING', jdText, focus,
       })) as GenerateGreetingResponse;
@@ -53,13 +59,13 @@ export default function App() {
         return;
       }
 
-      const text = response.greeting!;
-      setGreeting(text);
+      const r = response.result!;
+      setResult(r);
       setDebug('');
       setStatus('ready');
-      try { sessionStorage.setItem(CACHE_KEY, text); } catch {}
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
 
-      const ok = await copyText(text);
+      const ok = await copyText(r.greeting);
       if (ok) {
         setCopied(true);
         showToast('✅ 已复制，Ctrl+V 粘贴', 'success');
@@ -71,42 +77,37 @@ export default function App() {
   }, [showToast]);
 
   const handleCopy = useCallback(async () => {
-    if (!greeting) return;
-    const ok = await copyText(greeting);
+    if (!result) return;
+    const ok = await copyText(result.greeting);
     setCopied(ok);
     showToast(ok ? '✅ 已复制' : '复制失败', ok ? 'success' : 'error');
-  }, [greeting, showToast]);
+  }, [result, showToast]);
 
   if (collapsed) {
     return (
-      <button
-        onClick={() => setCollapsed(false)}
-        style={{
-          width: 40, height: 40, borderRadius: '50%',
-          background: '#5ebb8a', color: '#fff', border: 'none',
-          fontSize: 18, cursor: 'pointer',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}
-        title="展开"
-      >
+      <button onClick={() => setCollapsed(false)} style={{
+        width: 40, height: 40, borderRadius: '50%',
+        background: '#5ebb8a', color: '#fff', border: 'none',
+        fontSize: 18, cursor: 'pointer',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
         🤖
       </button>
     );
   }
 
+  const s = result?.score ?? 0;
+
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ fontSize: 12, color: '#9ca3af' }}>招呼语助手</span>
-        <button
-          onClick={() => setCollapsed(true)}
-          style={{
-            background: 'none', border: '1px solid #e5e7eb', borderRadius: 4,
-            color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          }}
-        >
+        <button onClick={() => setCollapsed(true)} style={{
+          background: 'none', border: '1px solid #e5e7eb', borderRadius: 4,
+          color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px',
+          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+        }}>
           收起
         </button>
       </div>
@@ -120,21 +121,51 @@ export default function App() {
         <div style={{
           fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          color: debug.startsWith('❌') ? '#dc2626' :
-            debug.startsWith('✅') ? '#16a34a' : '#2563eb',
-          wordBreak: 'break-all',
+          color: debug.startsWith('❌') ? '#dc2626' : '#2563eb',
         }}>
           {debug}
         </div>
       )}
-      {greeting && status === 'ready' && (
+      {result && status === 'ready' && (
         <div style={{
           marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340,
-          background: '#f0fdf4', border: '1px solid #bbf7d0',
+          background: '#fff', border: '1px solid #e5e7eb',
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
         }}>
-          <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>
-            {greeting}
+          {/* 匹配度 + 进度条 */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+            padding: '8px 12px', borderRadius: 6,
+            background: s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2',
+          }}>
+            <span style={{ fontSize: 12, color: '#6b7280' }}>匹配度</span>
+            <span style={{ fontSize: 24, fontWeight: 700, color: scoreColor(s), lineHeight: 1 }}>
+              {s}
+            </span>
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>/100</span>
+            <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}>
+              <div style={{
+                width: `${s}%`, height: '100%', borderRadius: 3,
+                background: scoreColor(s), transition: 'width 0.5s',
+              }} />
+            </div>
+          </div>
+          {/* 评分理由 */}
+          {result.scoreReason && (
+            <div style={{
+              fontSize: 11, color: '#6b7280', marginBottom: 10,
+              lineHeight: 1.5, padding: '6px 8px', borderRadius: 4,
+              background: '#f9fafb',
+            }}>
+              💡 {result.scoreReason}
+            </div>
+          )}
+          {/* 招呼语 */}
+          <div style={{
+            fontSize: 13, lineHeight: 1.7, color: '#1f2937',
+            marginBottom: 10, whiteSpace: 'pre-wrap',
+          }}>
+            {result.greeting}
           </div>
           <button onClick={handleCopy} style={{
             width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600,

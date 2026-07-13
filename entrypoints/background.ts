@@ -21,8 +21,8 @@ async function handleMessage(message: unknown) {
           return { type: 'GENERATE_GREETING_RESULT', error: '请先设置 API Key' };
         }
         const { text: resumeText } = await storage.getResume();
-        const greeting = await generateGreeting({ apiKey, resumeText, jdText, focus });
-        return { type: 'GENERATE_GREETING_RESULT', greeting };
+        const result = await generateGreeting({ apiKey, resumeText, jdText, focus });
+        return { type: 'GENERATE_GREETING_RESULT', result };
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : '生成失败，请重试';
         return { type: 'GENERATE_GREETING_RESULT', error: errorMessage };

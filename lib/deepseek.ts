@@ -1,6 +1,6 @@
 import { DEEPSEEK_API_URL, DEEPSEEK_MODEL, GENERATE_TIMEOUT_MS } from './types';
 import { buildSystemPrompt, buildUserPrompt } from './prompt';
-import type { FocusOption } from './types';
+import type { FocusOption, GreetingResult } from './types';
 
 export class DeepSeekError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -16,7 +16,7 @@ export interface GenerateParams {
   focus: FocusOption;
 }
 
-export async function generateGreeting(params: GenerateParams): Promise<string> {
+export async function generateGreeting(params: GenerateParams): Promise<GreetingResult> {
   const { apiKey, resumeText, jdText, focus } = params;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
@@ -35,7 +35,7 @@ export async function generateGreeting(params: GenerateParams): Promise<string> 
           { role: 'user', content: buildUserPrompt(resumeText, jdText, focus) },
         ],
         temperature: 0.7,
-        max_tokens: 300,
+        max_tokens: 500,
       }),
       signal: controller.signal,
     });
@@ -48,11 +48,12 @@ export async function generateGreeting(params: GenerateParams): Promise<string> 
     }
 
     const data = await response.json();
-    const content = (data as { choices?: Array<{ message?: { content?: string } }> })
+    const raw = (data as { choices?: Array<{ message?: { content?: string } }> })
       ?.choices?.[0]?.message?.content?.trim();
 
-    if (!content) throw new DeepSeekError(0, 'Empty response from DeepSeek');
-    return content;
+    if (!raw) throw new DeepSeekError(0, 'Empty response from DeepSeek');
+
+    return parseResult(raw);
   } catch (err) {
     if (err instanceof DeepSeekError) throw err;
     if ((err as Error).name === 'AbortError') throw new DeepSeekError(408, '请求超时');
@@ -60,6 +61,25 @@ export async function generateGreeting(params: GenerateParams): Promise<string> 
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function parseResult(raw: string): GreetingResult {
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        greeting: String(parsed.greeting || ''),
+        score: Math.min(100, Math.max(0, Number(parsed.score) || 50)),
+        scoreReason: String(parsed.scoreReason || ''),
+      };
+    }
+  } catch {}
+
+  const scoreMatch = raw.match(/评分[：:]\s*(\d+)/) || raw.match(/score[：:]\s*(\d+)/i);
+  const score = scoreMatch ? Math.min(100, Math.max(0, Number(scoreMatch[1]))) : 50;
+
+  return { greeting: raw, score, scoreReason: '' };
 }
 
 export async function validateApiKey(apiKey: string): Promise<boolean> {
