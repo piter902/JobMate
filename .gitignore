@@ -1,0 +1,4 @@
+recruitment-greeting-plugin/
+node_modules/
+.output/
+dist/
