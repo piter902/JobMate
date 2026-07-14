@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { storage } from '@/lib/storage';
 import { parseResume } from '@/lib/resume-parser';
-import { getRecentEvents } from '@/lib/analytics';
 
 export function SettingsForm() {
   const [apiKey, setApiKey] = useState('');
@@ -11,7 +10,6 @@ export function SettingsForm() {
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-  const [events, setEvents] = useState<Array<{ event: string; time: string }>>([]);
 
   useEffect(() => {
     (async () => {
@@ -20,9 +18,6 @@ export function SettingsForm() {
       const { text, fileName } = await storage.getResume();
       if (fileName) setResumeFileName(fileName);
       if (text) setResumeLength(text.length);
-
-      const recent = await getRecentEvents();
-      setEvents(recent.slice(-5).reverse());
     })();
   }, []);
 
@@ -90,29 +85,6 @@ export function SettingsForm() {
             {parsing ? '解析中...' : '📎 点击上传 PDF 或 DOCX 简历'}
             <input type="file" accept=".pdf,.docx" onChange={handleFileUpload} disabled={parsing} style={{ display: 'none' }} />
           </label>
-        )}
-      </section>
-
-      {/* 埋点日志 */}
-      <section style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>📊 最近事件</h2>
-        {events.length === 0 ? (
-          <p style={{ fontSize: 12, color: '#9ca3af' }}>暂无，点一次生成招呼语后回来查看</p>
-        ) : (
-          <div style={{ maxHeight: 120, overflowY: 'auto' }}>
-            {events.map((e, i) => (
-              <div key={i} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '4px 0', borderBottom: '1px solid #f3f4f6', fontSize: 12,
-              }}>
-                <span style={{
-                  color: e.event.includes('error') ? '#dc2626' : '#16a34a',
-                  fontWeight: 500,
-                }}>{e.event}</span>
-                <span style={{ color: '#9ca3af' }}>{e.time.slice(11, 19)}</span>
-              </div>
-            ))}
-          </div>
         )}
       </section>
 
