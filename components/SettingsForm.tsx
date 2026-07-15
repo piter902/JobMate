@@ -104,6 +104,8 @@ export function SettingsForm() {
 
       <section style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>联系作者</h2>
+        <p style={{ fontSize: 11, color: '#9ca3af', marginBottom: 10, lineHeight: 1.5 }}>简历优化、求职咨询或商务合作，欢迎加微信交流</p>
+
         <div style={{ textAlign: 'center' }}>
           <img src={chrome.runtime.getURL('qrcode.png')} alt="微信二维码" style={{
             width: 160, height: 160, borderRadius: 8, border: '1px solid #e5e7eb',
