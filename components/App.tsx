@@ -183,7 +183,7 @@ export default function App() {
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ greeting: r.greeting, score: r.score, scoreReason: r.scoreReason })); } catch {}
 
       try {
-        if (r.company || r.jobTitle) {
+        if (r.company && r.jobTitle && r.company !== r.jobTitle) {
           await saveGreeting({
             company: r.company, jobTitle: r.jobTitle, bossName: r.bossName,
             jdText: r.jdText, greeting: r.greeting, score: r.score,

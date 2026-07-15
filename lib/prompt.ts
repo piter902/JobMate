@@ -66,9 +66,9 @@ export function buildExtractAndGeneratePrompt(pageText: string, focus: FocusOpti
 
 返回JSON（不要任何其他内容）：
 {
-  "company": "公司名",
-  "jobTitle": "岗位名",
-  "bossName": "发布人",
+  "company": "公司/企业名称（如：阿里巴巴、华为技术、创远高新），不要填成岗位名",
+  "jobTitle": "岗位名称（如：前端开发工程师、产品经理），不要填成公司名",
+  "bossName": "HR/发布人姓名",
   "jdText": "JD原文截取",
   "dimensions": [
     {"requirement": "JD中明确列出的一个要求", "matched": true, "evidence": "简历中的匹配证据"},
