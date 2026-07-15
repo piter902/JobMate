@@ -118,7 +118,7 @@ export default function App() {
 
         // 2. 提取当前页面的公司+岗位
         const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
-        const company = extractCompany();
+        const company = extractCompany(); const title2 = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title2 || "?"})`);
         const title = extractJobTitle();
         setCurrentCompany(company); setCurrentTitle(title);
 
@@ -164,7 +164,7 @@ export default function App() {
       setDebug('⏳ 分析匹配度...');
 
       const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
-      const company = extractCompany();
+      const company = extractCompany(); const title2 = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title2 || "?"})`);
       const title = extractJobTitle();
       setCurrentCompany(company); setCurrentTitle(title);
 

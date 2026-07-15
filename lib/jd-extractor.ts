@@ -117,35 +117,50 @@ function clean(text: string): string {
   return text.replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+
 // ---- 公司名 & 岗位名提取 ----
 
 export function extractCompany(): string {
+  // 只从明确含 company/biz 类名的元素提取
   const selectors = [
-    '.job-detail .company-name', '.job-detail .name',
-    '.job-sec .company', '.biz-name',
     '[class*="company"] [class*="name"]',
     '[class*="biz"] [class*="name"]',
-    '.name-box .name',
+    '.biz-name',
+    '[class*="company-name"]',
+    '[class*="employer"]',
   ];
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    const text = el?.textContent?.trim();
-    if (text && text.length >= 2 && text.length <= 60) return text;
+    for (const el of document.querySelectorAll(sel)) {
+      const text = el.textContent?.trim() || '';
+      if (text.length >= 2 && text.length <= 50) return text;
+    }
   }
   return '';
 }
 
 export function extractJobTitle(): string {
+  // 只从明确含 job/title/position 类名的元素提取
   const selectors = [
-    '.job-detail .job-name', '.job-detail .title',
-    '.job-sec .name', '.detail-top .name h1',
-    '[class*="job"] [class*="name"]', '[class*="job"] [class*="title"]',
-    'h1', '.name h1',
+    '[class*="job"] [class*="title"]',
+    '[class*="job-name"]',
+    '[class*="position"]',
+    '.detail-top .name h1',
+    '.job-detail h1',
+    '.job-detail [class*="title"]',
   ];
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    const text = el?.textContent?.trim();
-    if (text && text.length >= 2 && text.length <= 80) return text;
+    for (const el of document.querySelectorAll(sel)) {
+      const text = el.textContent?.trim() || '';
+      // 排除公司名（通常较短且不含岗位特征词）
+      if (text.length >= 3 && text.length <= 60) return text;
+    }
+  }
+
+  // 最后的兜底：找 h1（但要排除公司名的可能）
+  const h1s = document.querySelectorAll('h1');
+  for (const el of h1s) {
+    const text = el.textContent?.trim() || '';
+    if (text.length >= 3 && text.length <= 60) return text;
   }
   return '';
 }
