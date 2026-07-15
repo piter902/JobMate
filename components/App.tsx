@@ -221,17 +221,6 @@ export default function App() {
     showToast('✅ 已复制', 'success');
   }, [result, showToast]);
 
-  const handleManualFill = useCallback(() => {
-    if (!result) return;
-    const input = findInputAnywhere();
-    if (input && doFill(input, result.greeting)) {
-      stopPoll(); autoFilledRef.current = true; setAutoFilled(true); setDebug('');
-      showToast('✅ 已填入', 'success');
-    } else { handleCopy(); }
-  }, [result, handleCopy, stopPoll, showToast]);
-
-  const hasInput = findInputAnywhere() !== null;
-
   if (collapsed) {
     return <button onClick={() => setCollapsed(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: '#5ebb8a', color: '#fff', border: 'none', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>💼</button>;
   }
@@ -268,13 +257,7 @@ export default function App() {
           </div>
           {result.scoreReason && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, lineHeight: 1.5, padding: '6px 8px', borderRadius: 4, background: '#f9fafb' }}>💡 {result.scoreReason}</div>}
           <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>{result.greeting}</div>
-          {autoFilled ? (
-            <div style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', textAlign: 'center', background: '#f0fdf4', color: '#16a34a' }}>✅ 已自动填入聊天框</div>
-          ) : hasInput ? (
-            <button onClick={handleManualFill} style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: '#2563eb', color: '#fff' }}>📝 一键填入</button>
-          ) : (
             <button onClick={handleCopy} style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: copied ? '#16a34a' : '#22c55e', color: '#fff' }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>
-          )}
         </div>
       )}
       <Toast toast={toast} onDone={clearToast} />
