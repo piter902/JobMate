@@ -48,6 +48,8 @@ ${jdText}
 }
 
 // 从页面文本提取信息并生成招呼语（一次调用）
+
+// 从页面文本提取信息并生成招呼语（一次调用）
 export function buildExtractAndGeneratePrompt(pageText: string, focus: FocusOption, resumeText: string): {
   system: string;
   user: string;
@@ -60,32 +62,56 @@ export function buildExtractAndGeneratePrompt(pageText: string, focus: FocusOpti
   };
 
   return {
-    system: `你是求职者的AI助手。从Boss直聘页面文本中提取关键信息，并生成招呼语。
+    system: `你是求职者的AI助手。从Boss直聘页面提取信息，逐维度匹配JD和简历，生成招呼语。
 
-返回JSON（不要其他内容）：
+返回JSON（不要任何其他内容）：
 {
-  "company": "公司名称",
-  "jobTitle": "岗位名称",
-  "bossName": "HR/发布人姓名",
-  "jdText": "职位描述原文（从页面文本中截取，不要修改）",
-  "greeting": "招呼语文字",
-  "score": 85,
-  "scoreReason": "评分依据"
+  "company": "公司名",
+  "jobTitle": "岗位名",
+  "bossName": "发布人",
+  "jdText": "JD原文截取",
+  "dimensions": [
+    {"requirement": "JD中明确列出的一个要求", "matched": true, "evidence": "简历中的匹配证据"},
+    {"requirement": "JD中的另一个要求", "matched": false, "evidence": "简历中缺乏"}
+  ],
+  "score": 75,
+  "matchedCount": 6,
+  "totalCount": 8,
+  "greeting": "招呼语",
+  "scoreReason": "匹配6/8项。优势：xxx。短板：缺yyy"
 }
 
-规则：
-- company/jobTitle/bossName: 从页面文本中识别，找不到就填空字符串""
-- jdText: 原文截取任职要求/岗位职责/职位描述部分，不改动文字
-- greeting: 你是求职者给HR发消息,50-150字,只用简历中的真实信息,不编造
-- score: 0-100,综合技能/经验/学历匹配度
-- scoreReason: 一句话`,
+===== 逐维度打分规则 =====
 
-    user: `【我的简历】
-${resumeText || '（未提供）'}
+1. 从JD原文中提取每一条明确列出的任职要求，作为独立维度。
+   包括：学历、专业、年限、每项技术/工具/语言、行业背景、
+   每项软技能（沟通/文档/管理等）、证书资质、其他硬性条件。
+   只提取JD中明确写出的，不编造维度。
+
+2. 逐维度对比简历：
+   - matched=true → evidence写"简历中：{具体匹配内容}"
+   - matched=false → evidence写"简历中无此项"
+
+3. 评分：score = round((matchedCount / totalCount) * 100)
+   例如：8个维度中6个匹配 → 75分
+
+4. 招呼语规则（极其重要）：
+   - 你是求职者给HR发消息
+   - 只提及 matched=true 的维度，绝口不提不匹配的
+   - 简历中没有的能力/经验/技能，一个字都不准编造
+   - 50-150字，不用"您好，我是XXX"开头
+   - 侧重点"${focusMap[focus]}"：优先展开该维度
+
+5. scoreReason格式："匹配X/Y项。优势：[关键匹配点]。短板：[关键缺失]"`,
+
+    user: `【我的简历（只有这些是真实的，不能超出此范围）】
+${resumeText || '（未提供简历）'}
 
 【Boss直聘页面文本】
 ${pageText.slice(0, 4000)}
 
-侧重点：${focusMap[focus]}`,
+侧重点：${focusMap[focus]}
+
+请逐维度对比分析，生成招呼语。`,
   };
 }

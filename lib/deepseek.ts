@@ -38,15 +38,14 @@ export async function generateGreeting(params: GenerateParams): Promise<Greeting
     });
 
     if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
+      const errorBody = await response.json().catch(() => ({}));
       throw new DeepSeekError(response.status,
-        (errBody as { error?: { message?: string } })?.error?.message || `HTTP ${response.status}`);
+        (errorBody as { error?: { message?: string } })?.error?.message || `HTTP ${response.status}`);
     }
 
     const data = await response.json();
     const raw = (data as { choices?: Array<{ message?: { content?: string } }> })
       ?.choices?.[0]?.message?.content?.trim();
-
     if (!raw) throw new DeepSeekError(0, 'Empty response');
     return parseResult(raw);
   } catch (err) {
@@ -59,33 +58,19 @@ export async function generateGreeting(params: GenerateParams): Promise<Greeting
 }
 
 function parseResult(raw: string): GreetingResult {
-  // 尝试提取 JSON（可能被 markdown 代码块包裹）
-  let jsonStr = raw;
-  const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlock) jsonStr = codeBlock[1].trim();
-
-  // 尝试解析 JSON
+  const jsonStr = raw.replace(/```(?:json)?\s*([\s\S]*?)```/, '$1');
   const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const p = JSON.parse(jsonMatch[0]);
-      const greeting = String(p.greeting || p.招呼语 || '');
-      if (greeting.length >= 10) {
-        const rawScore = Number(p.score ?? p.匹配度 ?? NaN);
-        return {
-          greeting,
-          score: Number.isFinite(rawScore) ? Math.round(Math.min(100, Math.max(0, rawScore))) : -1,
-          scoreReason: String(p.scoreReason || p.理由 || ''),
-        };
-      }
-    } catch { /* JSON 解析失败，继续降级 */ }
+      return {
+        greeting: String(p.greeting || ''),
+        score: Math.round(Math.min(100, Math.max(0, Number(p.score) || 50))),
+        scoreReason: String(p.scoreReason || ''),
+      };
+    } catch {}
   }
-
-  // 降级：尝试从文本中提取评分
-  const sm = raw.match(/评分[：:]\s*(\d+)/) || raw.match(/匹配度[：:]\s*(\d+)/) || raw.match(/"score"\s*:\s*(\d+)/);
-  const score = sm ? Math.round(Math.min(100, Math.max(0, Number(sm[1])))) : -1;
-
-  return { greeting: raw, score, scoreReason: '' };
+  return { greeting: raw, score: 50, scoreReason: '' };
 }
 
 export async function validateApiKey(apiKey: string): Promise<boolean> {
@@ -100,14 +85,24 @@ export async function validateApiKey(apiKey: string): Promise<boolean> {
   } catch { return false; }
 }
 
-// 一次调用：提取页面信息 + 生成招呼语
+// ===== 一次调用：提取页面信息 + 逐维度打分 + 生成招呼语 =====
+
+export interface DimensionMatch {
+  requirement: string;
+  matched: boolean;
+  evidence: string;
+}
+
 export interface ExtractAndGenerateResult {
   company: string;
   jobTitle: string;
   bossName: string;
   jdText: string;
-  greeting: string;
+  dimensions: DimensionMatch[];
   score: number;
+  matchedCount: number;
+  totalCount: number;
+  greeting: string;
   scoreReason: string;
 }
 
@@ -134,7 +129,7 @@ export async function extractAndGenerate(
           { role: 'user', content: user },
         ],
         temperature: 0.7,
-        max_tokens: 800,
+        max_tokens: 1200,
       }),
       signal: controller.signal,
     });
@@ -150,18 +145,29 @@ export async function extractAndGenerate(
       ?.choices?.[0]?.message?.content?.trim();
     if (!raw) throw new DeepSeekError(0, 'Empty response');
 
-    // 解析 JSON
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const p = JSON.parse(jsonMatch[0]);
+      const dims: DimensionMatch[] = Array.isArray(p.dimensions)
+        ? p.dimensions.map((d: Record<string, unknown>) => ({
+            requirement: String(d.requirement || ''),
+            matched: Boolean(d.matched),
+            evidence: String(d.evidence || ''),
+          }))
+        : [];
+      const mc = Number(p.matchedCount) || dims.filter(d => d.matched).length;
+      const tc = Number(p.totalCount) || dims.length || 1;
       return {
         company: String(p.company || ''),
         jobTitle: String(p.jobTitle || ''),
         bossName: String(p.bossName || ''),
         jdText: String(p.jdText || ''),
+        dimensions: dims,
         greeting: String(p.greeting || ''),
-        score: Math.round(Math.min(100, Math.max(0, Number(p.score) || 50))),
-        scoreReason: String(p.scoreReason || ''),
+        score: Math.round(Math.min(100, Math.max(0, Number(p.score) || Math.round((mc / tc) * 100)))),
+        matchedCount: mc,
+        totalCount: tc,
+        scoreReason: String(p.scoreReason || `匹配${mc}/${tc}项`),
       };
     }
     throw new DeepSeekError(0, 'Failed to parse JSON response');
