@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
 import type { FocusOption, GenerateGreetingResponse, GreetingResult } from '@/lib/types';
-
 import { track } from '@/lib/analytics';
+
 const CACHE_KEY = 'ga_result';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
@@ -22,15 +22,37 @@ export default function App() {
   const [result, setResult] = useState<GreetingResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [autoFilled, setAutoFilled] = useState(false);
   const { toast, showToast, clearToast } = useToast();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
     try {
       const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); }
+      if (cached) {
+        const r = JSON.parse(cached) as GreetingResult;
+        setResult(r); setStatus('ready'); setCollapsed(false);
+        // 恢复后也尝试自动填入
+        scheduleAutoFill(r.greeting);
+      }
     } catch {}
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
+
+  const scheduleAutoFill = useCallback((text: string) => {
+    // 等 3 秒让聊天 iframe 完全加载，然后尝试填入
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const ok = tryAutoFill(text);
+      if (ok) {
+        setAutoFilled(true);
+        setDebug('✅ 已自动填入');
+        showToast('✅ 已自动填入聊天框', 'success');
+        try { sessionStorage.removeItem(CACHE_KEY); } catch {}
+      }
+    }, 3000);
+  }, [showToast]);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setCollapsed(false);
@@ -38,6 +60,7 @@ export default function App() {
     setStatus('loading');
     setResult(null);
     setCopied(false);
+    setAutoFilled(false);
 
     try {
       const { extractJD } = await import('@/lib/jd-extractor');
@@ -57,13 +80,17 @@ export default function App() {
       setStatus('ready');
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
 
-      const ok = await copyText(r.greeting);
-      if (ok) { setCopied(true); showToast('✅ 已复制，Ctrl+V 粘贴', 'success'); }
+      // 复制 + 尝试自动填入
+      track('greeting_button_clicked', { focus });
+      await copyText(r.greeting);
+      setCopied(true);
+
+      scheduleAutoFill(r.greeting);
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
     }
-  }, [showToast]);
+  }, [scheduleAutoFill]);
 
   const handleCopy = useCallback(async () => {
     if (!result) return;
@@ -109,7 +136,6 @@ export default function App() {
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340,
           background: '#fff', border: '1px solid #e5e7eb',
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
-          {/* 匹配度 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
             padding: '8px 12px', borderRadius: 6,
             background: valid ? (s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2') : '#f9fafb' }}>
@@ -125,27 +151,77 @@ export default function App() {
               </div>
             )}
           </div>
-          {/* 评分理由 */}
           {result.scoreReason && (
             <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, lineHeight: 1.5,
               padding: '6px 8px', borderRadius: 4, background: '#f9fafb' }}>
               💡 {result.scoreReason}
             </div>
           )}
-          {/* 招呼语 */}
           <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>
             {result.greeting}
           </div>
-          <button onClick={handleCopy} style={{
-            width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600,
-            borderRadius: 6, border: 'none', cursor: 'pointer',
-            background: copied ? '#16a34a' : '#22c55e', color: '#fff',
-          }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>
+          {autoFilled ? (
+            <div style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600,
+              borderRadius: 6, border: 'none', textAlign: 'center',
+              background: '#f0fdf4', color: '#16a34a' }}>
+              ✅ 已自动填入聊天框
+            </div>
+          ) : (
+            <button onClick={handleCopy} style={{
+              width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600,
+              borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: copied ? '#16a34a' : '#22c55e', color: '#fff',
+            }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>
+          )}
         </div>
       )}
       <Toast toast={toast} onDone={clearToast} />
     </div>
   );
+}
+
+// ---- 自动填入 ----
+
+function tryAutoFill(text: string): boolean {
+  // 1. 主文档
+  let el = findInput(document);
+  if (el) return doFill(el, text);
+
+  // 2. 同源 iframe（静默跳过跨域的）
+  for (const iframe of document.querySelectorAll('iframe')) {
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) continue;
+      el = findInput(doc);
+      if (el) return doFill(el, text);
+    } catch { /* 跨域 iframe，跳过 */ }
+  }
+
+  return false;
+}
+
+function findInput(doc: Document): HTMLElement | null {
+  for (const el of doc.querySelectorAll('textarea, [contenteditable="true"]')) {
+    const he = el as HTMLElement;
+    if (he.offsetHeight > 20 && he.offsetWidth > 50) return he;
+  }
+  return null;
+}
+
+function doFill(el: HTMLElement, text: string): boolean {
+  try {
+    el.focus();
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+      const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (ns) ns.call(el, text); else el.value = text;
+    } else {
+      el.textContent = '';
+      document.execCommand('insertText', false, text);
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  } catch { return false; }
 }
 
 async function copyText(text: string): Promise<boolean> {
