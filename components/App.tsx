@@ -118,8 +118,8 @@ export default function App() {
 
         // 2. 提取当前页面的公司+岗位
         const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
-        const company = extractCompany(); const title2 = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title2 || "?"})`);
-        const title = extractJobTitle();
+        const company = extractCompany();
+        const title = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title || "?"})`);
         setCurrentCompany(company); setCurrentTitle(title);
 
         if (!company && !title) return;
@@ -164,8 +164,8 @@ export default function App() {
       setDebug('⏳ 分析匹配度...');
 
       const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
-      const company = extractCompany(); const title2 = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title2 || "?"})`);
-      const title = extractJobTitle();
+      const company = extractCompany();
+      const title = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title || "?"})`);
       setCurrentCompany(company); setCurrentTitle(title);
 
       await doGenerate(jdText, focus, company, title);

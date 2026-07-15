@@ -1,4 +1,4 @@
-// Boss直聘 JD 提取器 —— 支持列表页和详情页
+// Boss直聘 JD 提取器
 
 const DETAIL_SELECTORS = [
   '.job-sec .job-sec-text',
@@ -26,7 +26,6 @@ const MIN_LEN = 50;
 export function extractJD(): string | null {
   const isList = isListingPage();
 
-  // 1. 选择器直接匹配
   const selectors = isList ? [...LIST_SELECTORS, ...DETAIL_SELECTORS] : DETAIL_SELECTORS;
   for (const sel of selectors) {
     for (const el of document.querySelectorAll(sel)) {
@@ -36,7 +35,6 @@ export function extractJD(): string | null {
     }
   }
 
-  // 2. 从"立即沟通"按钮定位所属职位区块
   const btn = findChatButton();
   if (btn) {
     const section = walkUp(btn);
@@ -46,7 +44,6 @@ export function extractJD(): string | null {
     }
   }
 
-  // 3. 全局扫描含 JD 关键词的节点
   const scope = document.querySelector('main, [role="main"], .main, .container') || document.body;
   const candidates: Array<{ el: Element; len: number }> = [];
   for (const el of scope.querySelectorAll('div, section, article')) {
@@ -65,6 +62,75 @@ export function extractJD(): string | null {
   return null;
 }
 
+// ---- 公司名提取 ----
+
+export function extractCompany(): string {
+  // 策略：找明确包含 company/biz 类名的元素，且内容不像岗位名
+  const selectors = [
+    '[class*="company-name"]',
+    '[class*="company"] [class*="name"]',
+    '[class*="biz-name"]',
+    '[class*="employer"]',
+    '.name-box .name',
+  ];
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      const text = (el.textContent || '').trim();
+      if (isCompanyName(text)) return text;
+    }
+  }
+  return '';
+}
+
+function isCompanyName(text: string): boolean {
+  if (text.length < 2 || text.length > 50) return false;
+  // 排除包含薪资格式的内容
+  if (/\d{1,2}[kK万]/.test(text)) return false;
+  if (/\d+-\d+[kK]?/.test(text)) return false;
+  // 排除纯岗位描述
+  if (/前端|后端|工程师|经理|总监|专员|实习|开发|设计|运营|产品/.test(text) && !/[公司|集团|科技|网络|信息|软件|数据]/.test(text)) return false;
+  return true;
+}
+
+// ---- 岗位名提取 ----
+
+export function extractJobTitle(): string {
+  // 策略：找主标题，但剥离薪资
+  const selectors = [
+    '.job-detail .job-name',
+    '[class*="job-name"]',
+    '[class*="job-title"]',
+    '.detail-top .name h1',
+    '.detail-top .name',
+    '.job-detail h1',
+  ];
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      const raw = (el.textContent || '').trim();
+      const text = stripSalary(raw);
+      if (text.length >= 2 && text.length <= 60) return text;
+    }
+  }
+
+  // 兜底：找第一个 h1，排除公司特征
+  for (const el of document.querySelectorAll('h1')) {
+    const raw = (el.textContent || '').trim();
+    const text = stripSalary(raw);
+    if (text.length >= 2 && text.length <= 60 && !isCompanyName(text)) return text;
+  }
+  return '';
+}
+
+// 剥离薪资后缀 如 "前端开发 20-30K" → "前端开发"
+function stripSalary(text: string): string {
+  return text
+    .replace(/\s*\d{1,3}-\d{1,3}[kK]?(\s*·\s*\d+薪)?/, '')
+    .replace(/\s*\d{1,2}[kK]-\d{1,2}[kK]/, '')
+    .trim();
+}
+
+// ---- 工具 ----
+
 function isListingPage(): boolean {
   const cards = document.querySelectorAll('[class*="job-card"], [class*="job-item"], [class*="job-list"] li');
   return cards.length >= 2 || /web\/geek|search|query/.test(location.pathname);
@@ -72,8 +138,7 @@ function isListingPage(): boolean {
 
 function findChatButton(): Element | null {
   for (const el of document.querySelectorAll('a, button, span, div')) {
-    const t = (el.textContent || '').trim();
-    if (t === '立即沟通' && isVisible(el as HTMLElement)) return el;
+    if ((el.textContent || '').trim() === '立即沟通' && isVisible(el as HTMLElement)) return el;
   }
   return null;
 }
@@ -115,52 +180,4 @@ function containsJD(text: string): boolean {
 
 function clean(text: string): string {
   return text.replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-}
-
-
-// ---- 公司名 & 岗位名提取 ----
-
-export function extractCompany(): string {
-  // 只从明确含 company/biz 类名的元素提取
-  const selectors = [
-    '[class*="company"] [class*="name"]',
-    '[class*="biz"] [class*="name"]',
-    '.biz-name',
-    '[class*="company-name"]',
-    '[class*="employer"]',
-  ];
-  for (const sel of selectors) {
-    for (const el of document.querySelectorAll(sel)) {
-      const text = el.textContent?.trim() || '';
-      if (text.length >= 2 && text.length <= 50) return text;
-    }
-  }
-  return '';
-}
-
-export function extractJobTitle(): string {
-  // 只从明确含 job/title/position 类名的元素提取
-  const selectors = [
-    '[class*="job"] [class*="title"]',
-    '[class*="job-name"]',
-    '[class*="position"]',
-    '.detail-top .name h1',
-    '.job-detail h1',
-    '.job-detail [class*="title"]',
-  ];
-  for (const sel of selectors) {
-    for (const el of document.querySelectorAll(sel)) {
-      const text = el.textContent?.trim() || '';
-      // 排除公司名（通常较短且不含岗位特征词）
-      if (text.length >= 3 && text.length <= 60) return text;
-    }
-  }
-
-  // 最后的兜底：找 h1（但要排除公司名的可能）
-  const h1s = document.querySelectorAll('h1');
-  for (const el of h1s) {
-    const text = el.textContent?.trim() || '';
-    if (text.length >= 3 && text.length <= 60) return text;
-  }
-  return '';
 }
