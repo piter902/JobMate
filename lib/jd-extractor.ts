@@ -1,4 +1,4 @@
-// Boss直聘 JD/公司/岗位提取器
+// Boss直聘 JD/公司/岗位/发布人提取器
 
 const DETAIL_SELECTORS = [
   '.job-sec .job-sec-text', '.job-detail .detail-content',
@@ -47,6 +47,7 @@ export function extractJD(): string | null {
   return null;
 }
 
+// ---- 公司名 ----
 export function extractCompany(): string {
   for (const sel of ['.boss-info-attr', '.boss-name', '[class*="boss-name"]']) {
     for (const el of document.querySelectorAll(sel)) {
@@ -57,6 +58,7 @@ export function extractCompany(): string {
   return '';
 }
 
+// ---- 岗位名 ----
 export function extractJobTitle(): string {
   for (const el of document.querySelectorAll('.position-name')) {
     const text = trimField(stripSalary(el.textContent || ''));
@@ -77,15 +79,34 @@ export function extractJobTitle(): string {
   return '';
 }
 
+// ---- 发布人 ----
 export function extractBossName(): string {
-  for (const sel of ['.name-text', '.boss-name', '[class*="boss"] [class*="name"]']) {
+  // 聊天页：通过 .position-name 定位当前对话区域，再找里面的 .name-text
+  const pos = document.querySelector('.position-name');
+  if (pos) {
+    // 向上找对话头部容器
+    let header: Element | null = pos.parentElement;
+    for (let i = 0; i < 6 && header; i++) {
+      const nameEl = header.querySelector('.name-text');
+      if (nameEl) {
+        const text = trimField(nameEl.textContent || '');
+        if (text.length >= 2 && text.length <= 20) return text;
+      }
+      header = header.parentElement;
+    }
+  }
+
+  // 详情/列表页
+  for (const sel of ['.boss-info-attr', '.boss-name', '[class*="boss-name"]']) {
     for (const el of document.querySelectorAll(sel)) {
       const text = trimField(el.textContent || '');
-      if (text.length >= 2 && text.length <= 20) return text;
+      if (text.length >= 2 && text.length <= 50) return text;
     }
   }
   return '';
 }
+
+// ---- 工具 ----
 
 function stripSalary(text: string): string {
   return text.replace(/\s*\d{1,3}-\d{1,3}[kK](\s*·\s*\d+薪)?/, '').replace(/\s*\d{1,2}[kK]-\d{1,2}[kK]/, '').trim();
@@ -120,8 +141,6 @@ function isExcluded(el: Element): boolean {
 }
 
 function containsJD(text: string): boolean { return JD_KEYWORDS.some(k => text.includes(k)); }
-
-// ---- 文本清洗 ----
 
 function clean(text: string): string {
   return text
