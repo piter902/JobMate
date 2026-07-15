@@ -1,8 +1,7 @@
-// 招呼语历史记录 —— 按公司+岗位匹配
-
 export interface GreetingRecord {
   company: string;
   jobTitle: string;
+  jdText: string;
   greeting: string;
   score: number;
   scoreReason: string;
@@ -14,10 +13,14 @@ const STORAGE_KEY = 'ga_history';
 export async function saveGreeting(record: GreetingRecord): Promise<void> {
   try {
     const list = await loadAll();
+    // 去重：同公司+同岗位的旧记录替换
+    const idx = list.findIndex(
+      r => r.company === record.company && r.jobTitle === record.jobTitle,
+    );
+    if (idx >= 0) list.splice(idx, 1);
     list.unshift(record);
     await chrome.storage.local.set({ [STORAGE_KEY]: list });
   } catch {
-    // 存储满了，清空全部再试
     await chrome.storage.local.remove(STORAGE_KEY);
     await chrome.storage.local.set({ [STORAGE_KEY]: [record] });
   }
@@ -28,28 +31,21 @@ export async function loadAll(): Promise<GreetingRecord[]> {
   return (r[STORAGE_KEY] || []) as GreetingRecord[];
 }
 
-/** 按公司全称+岗位名称精确匹配 */
-export async function findByCompanyAndTitle(
-  company: string,
-  jobTitle: string,
-): Promise<GreetingRecord | null> {
+export async function findMatch(company: string, jobTitle: string): Promise<GreetingRecord | null> {
   const list = await loadAll();
-  return list.find(
-    (r) =>
-      r.company.trim() === company.trim() &&
-      r.jobTitle.trim() === jobTitle.trim(),
-  ) || null;
+  // 精确匹配
+  const exact = list.find(r => r.company.trim() === company.trim() && r.jobTitle.trim() === jobTitle.trim());
+  if (exact) return exact;
+  // 降级：只按公司名
+  return list.find(r => r.company.trim() === company.trim()) || null;
 }
 
-/** 模糊匹配：先精确，不行就只按公司名 */
-export async function findMatch(
-  company: string,
-  jobTitle: string,
-): Promise<GreetingRecord | null> {
-  const exact = await findByCompanyAndTitle(company, jobTitle);
-  if (exact) return exact;
-
-  // 降级：只按公司名找最新的
+/** 更新已有记录（用于重新生成后覆盖） */
+export async function updateRecord(company: string, jobTitle: string, updates: Partial<GreetingRecord>): Promise<void> {
   const list = await loadAll();
-  return list.find((r) => r.company.trim() === company.trim()) || null;
+  const idx = list.findIndex(r => r.company === company && r.jobTitle === jobTitle);
+  if (idx >= 0) {
+    list[idx] = { ...list[idx], ...updates, time: Date.now() };
+    await chrome.storage.local.set({ [STORAGE_KEY]: list });
+  }
 }

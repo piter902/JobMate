@@ -3,13 +3,14 @@ import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
 import type { FocusOption, GenerateGreetingResponse, GreetingResult } from '@/lib/types';
 import { track } from '@/lib/analytics';
-import { saveGreeting, findMatch } from '@/lib/history';
+import { saveGreeting, findMatch, updateRecord } from '@/lib/history';
 
 const CACHE_KEY = 'ga_result';
 const POLL_INTERVAL = 100;
 const POLL_TIMEOUT = 5000;
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
+type PageMode = 'generate' | 'history';
 
 function scoreColor(s: number): string {
   if (s < 0) return '#9ca3af';
@@ -26,6 +27,10 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [autoFilled, setAutoFilled] = useState(false);
+  const [pageMode, setPageMode] = useState<PageMode>('generate');
+  const [regenerating, setRegenerating] = useState(false);
+  const [currentCompany, setCurrentCompany] = useState('');
+  const [currentTitle, setCurrentTitle] = useState('');
   const { toast, showToast, clearToast } = useToast();
 
   const autoFilledRef = useRef(false);
@@ -54,7 +59,6 @@ export default function App() {
         setAutoFilled(true); setDebug('');
         stopPoll();
         showToast('✅ 已自动填入聊天框', 'success');
-        try { sessionStorage.removeItem(CACHE_KEY); } catch {}
       }
     };
 
@@ -62,31 +66,85 @@ export default function App() {
     pollTimerRef.current = setInterval(tick, POLL_INTERVAL);
   }, [stopPoll, showToast]);
 
+  // 通用生成函数
+  const doGenerate = useCallback(async (
+    jdText: string,
+    focus: FocusOption,
+    company: string,
+    title: string,
+  ): Promise<GreetingResult | null> => {
+    const response = (await chrome.runtime.sendMessage({
+      type: 'GENERATE_GREETING', jdText, focus,
+    })) as GenerateGreetingResponse;
+    if (response.error) {
+      setDebug('❌ ' + response.error);
+      setStatus('error');
+      return null;
+    }
+    const r = response.result!;
+    setResult(r); setStatus('ready');
+    try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
+
+    // 保存历史（含 JD）
+    try {
+      if (company || title) {
+        await saveGreeting({
+          company: company || title, jobTitle: title || '',
+          jdText, greeting: r.greeting, score: r.score,
+          scoreReason: r.scoreReason, time: Date.now(),
+        });
+      }
+    } catch {}
+
+    await copyText(r.greeting); setCopied(true);
+    beginPoll(r.greeting);
+    return r;
+  }, [beginPoll]);
+
   useEffect(() => {
     (async () => {
       try {
         const r = await chrome.storage.local.get('deepseekApiKey');
         setNeedsSetup(!r.deepseekApiKey);
 
+        // 1. sessionStorage 缓存
         const cached = sessionStorage.getItem(CACHE_KEY);
         if (cached) {
-          const parsed = JSON.parse(cached) as GreetingResult;
-          setResult(parsed); setStatus('ready'); setCollapsed(false);
-          beginPoll(parsed.greeting);
+          setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false);
+          setPageMode('generate');
+          beginPoll(JSON.parse(cached).greeting);
           return;
         }
 
+        // 2. 提取当前页面的公司+岗位
         const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
         const company = extractCompany();
         const title = extractJobTitle();
-        if (company || title) {
-          const record = await findMatch(company, title);
-          if (record) {
-            setResult({ greeting: record.greeting, score: record.score, scoreReason: record.scoreReason || `历史记录 · ${record.company}` });
-            setStatus('ready'); setCollapsed(false);
-            await copyText(record.greeting); setCopied(true);
-            beginPoll(record.greeting);
-          }
+        setCurrentCompany(company); setCurrentTitle(title);
+
+        if (!company && !title) return;
+
+        // 3. 检查是否有 JD（能生成新招呼语）
+        const { extractJD } = await import('@/lib/jd-extractor');
+        const jdText = extractJD();
+
+        if (jdText) {
+          // 有 JD → 页面模式，等用户手动点生成
+          setPageMode('generate');
+          return;
+        }
+
+        // 4. 无 JD → 从历史匹配
+        const record = await findMatch(company, title);
+        if (record) {
+          setResult({
+            greeting: record.greeting, score: record.score,
+            scoreReason: record.scoreReason || `历史记录 · ${record.company}`,
+          });
+          setStatus('ready'); setCollapsed(false);
+          setPageMode('history');
+          await copyText(record.greeting); setCopied(true);
+          beginPoll(record.greeting);
         }
       } catch {}
     })();
@@ -100,36 +158,50 @@ export default function App() {
     stopPoll();
 
     try {
-      const { extractJD, extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
+      const { extractJD } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
       if (!jdText) { setDebug('❌ 未检测到职位描述'); setStatus('error'); return; }
-
       setDebug('⏳ 分析匹配度...');
-      const response = (await chrome.runtime.sendMessage({
-        type: 'GENERATE_GREETING', jdText, focus,
-      })) as GenerateGreetingResponse;
-      if (response.error) { setDebug('❌ ' + response.error); setStatus('error'); return; }
 
-      const r = response.result!;
-      setResult(r); setStatus('ready');
-      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
+      const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
+      const company = extractCompany();
+      const title = extractJobTitle();
+      setCurrentCompany(company); setCurrentTitle(title);
 
-      try {
-        const company = extractCompany();
-        const title = extractJobTitle();
-        if (company || title) {
-          await saveGreeting({ company: company || title, jobTitle: title || '', greeting: r.greeting, score: r.score, scoreReason: r.scoreReason, time: Date.now() });
-        }
-      } catch {}
-
+      await doGenerate(jdText, focus, company, title);
       track('greeting_button_clicked', { focus });
-      await copyText(r.greeting); setCopied(true);
-      beginPoll(r.greeting);
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
     }
-  }, [stopPoll, beginPoll]);
+  }, [stopPoll, doGenerate]);
+
+  const handleRegenerate = useCallback(async (focus: FocusOption = 'none') => {
+    stopPoll();
+    setRegenerating(true);
+    setDebug('⏳ 重新生成中...');
+
+    try {
+      const record = await findMatch(currentCompany, currentTitle);
+      if (!record?.jdText) {
+        setDebug('❌ 未找到缓存的 JD，无法重新生成');
+        setRegenerating(false);
+        return;
+      }
+
+      const r = await doGenerate(record.jdText, focus, currentCompany, currentTitle);
+      if (r) {
+        await updateRecord(currentCompany, currentTitle, {
+          greeting: r.greeting, score: r.score,
+          scoreReason: r.scoreReason, time: Date.now(),
+        });
+      }
+    } catch (err) {
+      setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
+    } finally {
+      setRegenerating(false);
+    }
+  }, [currentCompany, currentTitle, stopPoll, doGenerate]);
 
   const handleCopy = useCallback(async () => {
     if (!result) return;
@@ -141,8 +213,7 @@ export default function App() {
     if (!result) return;
     const input = findInputAnywhere();
     if (input && doFill(input, result.greeting)) {
-      stopPoll();
-      autoFilledRef.current = true;
+      stopPoll(); autoFilledRef.current = true;
       setAutoFilled(true); setDebug('');
       showToast('✅ 已填入', 'success');
     } else {
@@ -150,7 +221,6 @@ export default function App() {
     }
   }, [result, handleCopy, stopPoll, showToast]);
 
-  // 检测当前是否有可用输入框
   const hasInput = findInputAnywhere() !== null;
 
   if (collapsed) {
@@ -163,11 +233,29 @@ export default function App() {
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: '#9ca3af' }}>招呼语助手</span>
+        <span style={{ fontSize: 12, color: '#9ca3af' }}>
+          招呼语助手{pageMode === 'history' ? ' · 历史记录' : ''}
+        </span>
         <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 4, color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px' }}>收起</button>
       </div>
-      <GreetingButton onGenerate={handleGenerate} loading={status === 'loading'} disabled={needsSetup} disabledReason={needsSetup ? '请先设置 API Key' : undefined} />
+
+      {pageMode === 'generate' && (
+        <GreetingButton onGenerate={handleGenerate} loading={status === 'loading'} disabled={needsSetup} disabledReason={needsSetup ? '请先设置 API Key' : undefined} />
+      )}
+
+      {pageMode === 'history' && (
+        <button onClick={() => handleRegenerate('none')} disabled={regenerating || needsSetup} style={{
+          padding: '6px 14px', border: '1px solid #f59e0b', borderRadius: 6,
+          background: regenerating ? '#fffbeb' : '#fff', color: regenerating ? '#d97706' : '#f59e0b',
+          fontSize: 13, fontWeight: 500, cursor: needsSetup ? 'not-allowed' : 'pointer',
+          opacity: needsSetup ? 0.5 : 1, marginBottom: 8,
+        }}>
+          {regenerating ? '⏳ 重新生成中...' : '🔄 重新生成招呼语'}
+        </button>
+      )}
+
       {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : '#2563eb' }}>{debug}</div>}
+
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: valid ? (s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2') : '#f9fafb' }}>
