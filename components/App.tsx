@@ -83,9 +83,8 @@ export default function App() {
     return r;
   }, [beginPoll]);
 
-  // 从缓存查找招呼语
   const lookupCache = useCallback(async () => {
-    setLookingUp(true); setDebug('🔍 查找缓存...');
+    setLookingUp(true); setDebug('');
     try {
       const { extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
       const company = extractCompany();
@@ -94,7 +93,7 @@ export default function App() {
       setCurrentCompany(company); setCurrentTitle(title); setCurrentBoss(boss);
 
       if (!company && !title && !boss) {
-        setDebug('❌ 未检测到当前页面的公司/岗位/发布人信息');
+        setDebug('❌ 未识别到当前页面信息');
         setLookingUp(false);
         return;
       }
@@ -103,14 +102,14 @@ export default function App() {
       if (record) {
         setResult({
           greeting: record.greeting, score: record.score,
-          scoreReason: record.scoreReason || `缓存记录 · ${record.company || record.bossName} · ${record.jobTitle}`,
+          scoreReason: record.scoreReason || `${record.company || record.bossName} · ${record.jobTitle}`,
         });
         setStatus('ready'); setCollapsed(false); setPageMode('history');
         await copyText(record.greeting); setCopied(true);
         beginPoll(record.greeting);
-        setDebug('✅ 已匹配缓存 (' + (record.company || record.bossName) + ' · ' + record.jobTitle + ')');
+        setDebug(`✅ 已匹配 · ${record.company || record.bossName} · ${record.jobTitle}`);
       } else {
-        setDebug('ℹ 未匹配到缓存 (' + [company, title, boss].filter(Boolean).join(' · ') + ')');
+        setDebug(`未找到历史记录 (${[company, title, boss].filter(Boolean).join(' · ') || '无'})`);
       }
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '查找失败'));
@@ -121,33 +120,23 @@ export default function App() {
     (async () => {
       try {
         chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
-
         const cached = sessionStorage.getItem(CACHE_KEY);
         if (cached) {
           setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false);
           setPageMode('generate'); beginPoll(JSON.parse(cached).greeting);
           return;
         }
-
-        // 自动尝试匹配缓存
         const { extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
-        const company = extractCompany();
-        const title = extractJobTitle();
-        const boss = extractBossName();
+        const company = extractCompany(); const title = extractJobTitle(); const boss = extractBossName();
         setCurrentCompany(company); setCurrentTitle(title); setCurrentBoss(boss);
-
         if (!company && !title && !boss) return;
-
         const { extractJD } = await import('@/lib/jd-extractor');
-        const jdText = extractJD();
-        if (jdText) { setPageMode('generate'); return; }
-
+        if (extractJD()) { setPageMode('generate'); return; }
         const record = await findMatch(company, title, boss);
         if (record) {
           setResult({ greeting: record.greeting, score: record.score, scoreReason: record.scoreReason || `历史记录 · ${record.company || record.bossName}` });
           setStatus('ready'); setCollapsed(false); setPageMode('history');
-          await copyText(record.greeting); setCopied(true);
-          beginPoll(record.greeting);
+          await copyText(record.greeting); setCopied(true); beginPoll(record.greeting);
         }
       } catch {}
     })();
@@ -158,18 +147,12 @@ export default function App() {
     setCollapsed(false); setDebug('⏳ 分析中...');
     setStatus('loading'); setResult(null); setCopied(false);
     setAutoFilled(false); autoFilledRef.current = false; stopPoll();
-
     try {
       const { extractJD, extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
-      if (!jdText) { setDebug('❌ 未检测到职位描述，请尝试 🔍从缓存查找'); setStatus('error'); return; }
-
-      const company = extractCompany();
-      const title = extractJobTitle();
-      const boss = extractBossName();
+      if (!jdText) { setDebug('❌ 未检测到JD，可点「查历史」获取缓存'); setStatus('error'); return; }
+      const company = extractCompany(); const title = extractJobTitle(); const boss = extractBossName();
       setCurrentCompany(company); setCurrentTitle(title); setCurrentBoss(boss);
-      setDebug(`⏳ 分析匹配度... (${company || '?'} · ${title || '?'})`);
-
       await doGenerate(jdText, focus, company, title, boss);
       track('greeting_button_clicked', { focus });
     } catch (err) {
@@ -179,10 +162,10 @@ export default function App() {
   }, [stopPoll, doGenerate]);
 
   const handleRegenerate = useCallback(async (focus: FocusOption = 'none') => {
-    stopPoll(); setRegenerating(true); setDebug('⏳ 重新生成中...');
+    stopPoll(); setRegenerating(true);
     try {
       const record = await findMatch(currentCompany, currentTitle, currentBoss);
-      if (!record?.jdText) { setDebug('❌ 未找到缓存的 JD'); setRegenerating(false); return; }
+      if (!record?.jdText) { setDebug('❌ 缓存JD已失效'); setRegenerating(false); return; }
       const r = await doGenerate(record.jdText, focus, currentCompany, currentTitle, currentBoss);
       if (r) await updateRecord(currentCompany, currentTitle, currentBoss, { greeting: r.greeting, score: r.score, scoreReason: r.scoreReason, time: Date.now() });
     } catch (err) {
@@ -218,34 +201,44 @@ export default function App() {
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ fontSize: 12, color: '#9ca3af' }}>
-          招呼语助手{pageMode === 'history' ? ' · 历史记录' : ''}
+          招呼语助手{pageMode === 'history' ? ' · 历史' : ''}
         </span>
         <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 4, color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px' }}>收起</button>
       </div>
 
-      {/* 操作按钮区 */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: pageMode === 'generate' ? 0 : 0 }}>
-        {pageMode === 'generate' && (
+      {/* 主操作区 */}
+      {pageMode === 'generate' && (
+        <>
           <GreetingButton onGenerate={handleGenerate} loading={status === 'loading'} disabled={needsSetup} disabledReason={needsSetup ? '请先设置 API Key' : undefined} />
-        )}
-        {pageMode === 'history' && (
+          <div style={{ marginTop: 4 }}>
+            <button onClick={lookupCache} disabled={lookingUp || needsSetup} style={{
+              background: 'none', border: 'none', color: '#9ca3af', fontSize: 11, cursor: 'pointer',
+              padding: 0, textDecoration: 'underline', textUnderlineOffset: 3,
+              fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+              opacity: needsSetup ? 0.5 : 1,
+            }}>{lookingUp ? '查找中...' : '查历史招呼语 →'}</button>
+          </div>
+        </>
+      )}
+
+      {pageMode === 'history' && (
+        <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={() => handleRegenerate('none')} disabled={regenerating || needsSetup} style={{
             padding: '6px 14px', border: '1px solid #f59e0b', borderRadius: 6,
             background: regenerating ? '#fffbeb' : '#fff', color: regenerating ? '#d97706' : '#f59e0b',
             fontSize: 13, fontWeight: 500, cursor: needsSetup ? 'not-allowed' : 'pointer',
-            opacity: needsSetup ? 0.5 : 1,
-          }}>{regenerating ? '⏳ 重新生成中...' : '🔄 重新生成招呼语'}</button>
-        )}
-        {/* 从缓存查找按钮 — 所有页面都显示 */}
-        <button onClick={lookupCache} disabled={lookingUp || needsSetup} style={{
-          padding: '6px 12px', border: '1px solid #8b5cf6', borderRadius: 6,
-          background: lookingUp ? '#f5f3ff' : '#fff', color: lookingUp ? '#7c3aed' : '#8b5cf6',
-          fontSize: 13, fontWeight: 500, cursor: needsSetup ? 'not-allowed' : 'pointer',
-          opacity: needsSetup ? 0.5 : 1, whiteSpace: 'nowrap',
-        }}>{lookingUp ? '🔍 查找中...' : '🔍 从缓存查找'}</button>
-      </div>
+            opacity: needsSetup ? 0.5 : 1, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          }}>{regenerating ? '⏳ 重新生成中...' : '🔄 重新生成'}</button>
+          <button onClick={lookupCache} disabled={lookingUp || needsSetup} style={{
+            padding: '6px 14px', border: '1px solid #d1d5db', borderRadius: 6,
+            background: lookingUp ? '#f9fafb' : '#fff', color: '#6b7280',
+            fontSize: 13, cursor: needsSetup ? 'not-allowed' : 'pointer',
+            opacity: needsSetup ? 0.5 : 1, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          }}>{lookingUp ? '查找中...' : '🔍 刷新匹配'}</button>
+        </div>
+      )}
 
-      {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#2563eb' }}>{debug}</div>}
+      {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#6b7280' }}>{debug}</div>}
 
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
