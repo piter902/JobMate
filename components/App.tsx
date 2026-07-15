@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
-import type { FocusOption, GreetingResult } from '@/lib/types';
+import type { FocusOption, GreetingResult, GenerateGreetingResponse } from '@/lib/types';
 import { track } from '@/lib/analytics';
 import { saveGreeting, findMatch } from '@/lib/history';
 
@@ -19,10 +19,8 @@ function scoreColor(s: number): string {
   return '#dc2626';
 }
 
-// 页面文本提取（用于 LLM 分析，替代 DOM 选择器）
 function getPageText(): string {
-  // 优先取主内容区
-  const main = document.querySelector('main, [role="main"], .main, .container, .content, .wrap');
+  const main = document.querySelector('main, [role="main"], .main, .container');
   return ((main || document.body).innerText || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
 }
 
@@ -65,6 +63,15 @@ export default function App() {
     tick(); pollTimerRef.current = setInterval(tick, POLL_INTERVAL);
   }, [stopPoll, showToast]);
 
+  // 用已知 JD 生成招呼语（不重新提取页面）
+  const generateWithJD = useCallback(async (jdText: string, focus: FocusOption, company: string, title: string, boss: string) => {
+    const response = (await chrome.runtime.sendMessage({
+      type: 'GENERATE_GREETING', jdText, focus,
+    })) as GenerateGreetingResponse;
+    if (response.error) throw new Error(response.error);
+    return response.result!;
+  }, []);
+
   const lookupCache = useCallback(async () => {
     setLookingUp(true); setDebug('');
     try {
@@ -103,7 +110,6 @@ export default function App() {
     return stopPoll;
   }, []);
 
-  // 核心：LLM 提取 + 生成（一次 API 调用）
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setCollapsed(false); setDebug('⏳ LLM 分析页面...');
     setStatus('loading'); setResult(null); setCopied(false);
@@ -113,20 +119,41 @@ export default function App() {
       const pageText = getPageText();
       if (!pageText.trim()) { setDebug('❌ 页面无内容'); setStatus('error'); return; }
 
+      // 第一步：LLM 提取 + 生成
       const response = await chrome.runtime.sendMessage({
         type: 'EXTRACT_AND_GENERATE', pageText, focus,
-      }) as { type: string; result?: { company: string; jobTitle: string; bossName: string; jdText: string; greeting: string; score: number; scoreReason: string }; error?: string };
+      }) as {
+        type: string;
+        result?: { company: string; jobTitle: string; bossName: string; jdText: string; greeting: string; score: number; scoreReason: string };
+        error?: string;
+      };
 
       if (response.error) { setDebug('❌ ' + response.error); setStatus('error'); return; }
 
-      const r = response.result!;
+      let r = response.result!;
+      let fromCache = false;
+
+      // 第二步：如果 LLM 没提取到 JD，从本地缓存补
+      if (!r.jdText || r.jdText.trim().length < 20) {
+        setDebug('⏳ 页面无JD，从本地缓存查找...');
+        const record = await findMatch(r.company, r.jobTitle, r.bossName);
+        if (record?.jdText) {
+          setDebug('⏳ 找到缓存JD，重新生成...');
+          const cachedResult = await generateWithJD(record.jdText, focus, r.company, r.jobTitle, r.bossName);
+          r = { ...r, greeting: cachedResult.greeting, score: cachedResult.score, scoreReason: cachedResult.scoreReason, jdText: record.jdText };
+          fromCache = true;
+        }
+      }
+
+      // 如果仍然没有 JD 和招呼语
+      if (!r.greeting) { setDebug('❌ 无法获取JD，请在有JD的页面先生成一次'); setStatus('error'); return; }
+
       setCurrentCompany(r.company); setCurrentTitle(r.jobTitle); setCurrentBoss(r.bossName);
       setResult({ greeting: r.greeting, score: r.score, scoreReason: r.scoreReason });
-      setDebug(`✅ ${r.company || r.bossName} · ${r.jobTitle}`);
+      setDebug(`✅ ${r.company || r.bossName} · ${r.jobTitle}${fromCache ? ' (缓存JD)' : ''}`);
       setStatus('ready');
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ greeting: r.greeting, score: r.score, scoreReason: r.scoreReason })); } catch {}
 
-      // 保存历史
       try {
         if (r.company || r.jobTitle) {
           await saveGreeting({
@@ -145,7 +172,7 @@ export default function App() {
       setDebug(msg.includes('Extension context invalidated') ? '⚠ 请刷新Boss页面' : '❌ ' + (msg || '网络错误'));
       setStatus('error');
     }
-  }, [stopPoll, beginPoll]);
+  }, [stopPoll, beginPoll, generateWithJD]);
 
   const handleCopy = useCallback(async () => {
     if (!result) return;
@@ -188,7 +215,7 @@ export default function App() {
         }}>{lookingUp ? '查找中...' : '查历史招呼语 →'}</button>
       </div>
 
-      {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#6b7280' }}>{debug}</div>}
+      {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#2563eb' }}>{debug}</div>}
 
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
