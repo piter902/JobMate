@@ -135,7 +135,20 @@ export default function App() {
         if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); setPageMode('generate'); beginPoll(JSON.parse(cached).greeting); return; }
       } catch {}
     })();
-    return stopPoll;
+
+    // 监听简历切换 → 清除缓存的招呼语
+    const onStorageChange = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (changes['selectedResumeId']) {
+        sessionStorage.removeItem(CACHE_KEY);
+        setResult(null); setStatus('idle'); setDebug('');
+      }
+    };
+    chrome.storage.onChanged.addListener(onStorageChange);
+
+    return () => {
+      stopPoll();
+      chrome.storage.onChanged.removeListener(onStorageChange);
+    };
   }, []);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
