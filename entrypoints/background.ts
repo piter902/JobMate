@@ -23,7 +23,7 @@ async function handleMessage(message: unknown) {
       try {
         const apiKey = await storage.getApiKey();
         if (!apiKey) return { type: 'EXTRACT_AND_GENERATE_RESULT', error: '请先设置 API Key' };
-        const { text: resumeText } = await storage.getResume();
+        const { text: resumeText } = await storage.getActiveResume();
         const result = await extractAndGenerate(apiKey, resumeText, pageText, focus);
         track('greeting_generated', { focus, score: result.score, via: 'llm_extract' });
         return { type: 'EXTRACT_AND_GENERATE_RESULT', result };
@@ -38,7 +38,7 @@ async function handleMessage(message: unknown) {
       try {
         const apiKey = await storage.getApiKey();
         if (!apiKey) return { type: 'GENERATE_GREETING_RESULT', error: '请先设置 API Key' };
-        const { text: resumeText } = await storage.getResume();
+        const { text: resumeText } = await storage.getActiveResume();
         const result = await generateGreeting({ apiKey, resumeText, jdText, focus });
         track('greeting_generated', { focus, score: result.score });
         return { type: 'GENERATE_GREETING_RESULT', result };

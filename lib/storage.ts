@@ -1,47 +1,72 @@
 import { STORAGE_KEYS } from './types';
 
+export interface ResumeItem {
+  id: string;
+  text: string;
+  fileName: string;
+  time: number;
+}
+
 export const storage = {
   async getApiKey(): Promise<string> {
-    const result = await chrome.storage.local.get(STORAGE_KEYS.API_KEY);
-    return result[STORAGE_KEYS.API_KEY] || '';
+    const r = await chrome.storage.local.get(STORAGE_KEYS.API_KEY);
+    return r[STORAGE_KEYS.API_KEY] || '';
   },
 
   async setApiKey(key: string): Promise<void> {
     await chrome.storage.local.set({ [STORAGE_KEYS.API_KEY]: key });
   },
 
-  async getResume(): Promise<{ text: string; fileName: string }> {
-    const result = await chrome.storage.local.get([
-      STORAGE_KEYS.RESUME_TEXT,
-      STORAGE_KEYS.RESUME_FILE_NAME,
-    ]);
-    return {
-      text: result[STORAGE_KEYS.RESUME_TEXT] || '',
-      fileName: result[STORAGE_KEYS.RESUME_FILE_NAME] || '',
-    };
+  // ---- 多简历管理 ----
+
+  async getResumes(): Promise<ResumeItem[]> {
+    const r = await chrome.storage.local.get('resumes');
+    return (r['resumes'] || []) as ResumeItem[];
   },
 
-  async setResume(text: string, fileName: string): Promise<void> {
-    await chrome.storage.local.set({
-      [STORAGE_KEYS.RESUME_TEXT]: text,
-      [STORAGE_KEYS.RESUME_FILE_NAME]: fileName,
-    });
+  async saveResumes(list: ResumeItem[]): Promise<void> {
+    await chrome.storage.local.set({ resumes: list });
   },
 
-  async clearResume(): Promise<void> {
-    await chrome.storage.local.remove([
-      STORAGE_KEYS.RESUME_TEXT,
-      STORAGE_KEYS.RESUME_FILE_NAME,
-    ]);
+  async addResume(text: string, fileName: string): Promise<ResumeItem> {
+    const list = await this.getResumes();
+    const item: ResumeItem = { id: crypto.randomUUID(), text, fileName, time: Date.now() };
+    list.unshift(item);
+    await this.saveResumes(list);
+    // 自动选中新上传的
+    await this.selectResume(item.id);
+    return item;
+  },
+
+  async removeResume(id: string): Promise<void> {
+    const list = (await this.getResumes()).filter(r => r.id !== id);
+    await this.saveResumes(list);
+    const sel = await this.getSelectedResumeId();
+    if (sel === id) await this.selectResume(list[0]?.id || '');
+  },
+
+  async getSelectedResumeId(): Promise<string> {
+    const r = await chrome.storage.local.get('selectedResumeId');
+    return r['selectedResumeId'] || '';
+  },
+
+  async selectResume(id: string): Promise<void> {
+    await chrome.storage.local.set({ selectedResumeId: id });
+  },
+
+  async getActiveResume(): Promise<{ text: string; fileName: string }> {
+    const list = await this.getResumes();
+    const selId = await this.getSelectedResumeId();
+    const active = list.find(r => r.id === selId) || list[0];
+    return active ? { text: active.text, fileName: active.fileName } : { text: '', fileName: '' };
   },
 
   async hasApiKey(): Promise<boolean> {
-    const key = await this.getApiKey();
-    return key.length > 0;
+    return (await this.getApiKey()).length > 0;
   },
 
   async hasResume(): Promise<boolean> {
-    const { text } = await this.getResume();
+    const { text } = await this.getActiveResume();
     return text.length > 0;
   },
 };

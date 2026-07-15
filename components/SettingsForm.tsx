@@ -1,25 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
 import { storage } from '@/lib/storage';
+import type { ResumeItem } from '@/lib/storage';
 import { parseResume } from '@/lib/resume-parser';
+
+const FEISHU_URL = 'https://scnanhq8rwck.feishu.cn/wiki/DkScwkZiKigkgBkprZncGHpFnpe';
 
 export function SettingsForm() {
   const [apiKey, setApiKey] = useState('');
   const [maskedKey, setMaskedKey] = useState('');
-  const [resumeFileName, setResumeFileName] = useState('');
-  const [resumeLength, setResumeLength] = useState(0);
+  const [resumes, setResumes] = useState<ResumeItem[]>([]);
+  const [selectedId, setSelectedId] = useState('');
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const key = await storage.getApiKey();
-      if (key) { setMaskedKey(key.slice(0, 8) + '...' + key.slice(-4)); setApiKey(key); }
-      const { text, fileName } = await storage.getResume();
-      if (fileName) setResumeFileName(fileName);
-      if (text) setResumeLength(text.length);
-    })();
+  const load = useCallback(async () => {
+    const key = await storage.getApiKey();
+    if (key) { setMaskedKey(key.slice(0, 8) + '...' + key.slice(-4)); setApiKey(key); }
+    const list = await storage.getResumes();
+    setResumes(list);
+    const sel = await storage.getSelectedResumeId();
+    setSelectedId(sel || list[0]?.id || '');
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const handleSaveKey = useCallback(async () => {
     if (!apiKey.trim()) { setMessage({ text: '请输入 API Key', type: 'error' }); return; }
@@ -30,9 +34,7 @@ export function SettingsForm() {
         await storage.setApiKey(apiKey.trim());
         setMaskedKey(apiKey.trim().slice(0, 8) + '...' + apiKey.trim().slice(-4));
         setMessage({ text: 'API Key 验证成功', type: 'success' });
-      } else {
-        setMessage({ text: 'API Key 验证失败', type: 'error' });
-      }
+      } else { setMessage({ text: 'API Key 验证失败', type: 'error' }); }
     } catch { setMessage({ text: '验证失败，请检查网络', type: 'error' }); }
     finally { setSaving(false); }
   }, [apiKey]);
@@ -42,22 +44,24 @@ export function SettingsForm() {
     setParsing(true); setMessage(null);
     try {
       const result = await parseResume(file);
-      await storage.setResume(result.text, result.fileName);
-      setResumeFileName(result.fileName); setResumeLength(result.text.length);
-      setMessage({ text: `简历解析成功（${result.text.length} 字符）`, type: 'success' });
+      await storage.addResume(result.text, result.fileName);
+      await load();
+      setMessage({ text: `"${result.fileName}" 上传成功`, type: 'success' });
     } catch (err) {
       setMessage({ text: (err as Error).message || '解析失败', type: 'error' });
     } finally { setParsing(false); }
+  }, [load]);
+
+  const handleSelect = useCallback(async (id: string) => {
+    await storage.selectResume(id); setSelectedId(id);
   }, []);
 
-  const handleClearResume = useCallback(async () => {
-    await storage.clearResume();
-    setResumeFileName(''); setResumeLength(0);
-    setMessage({ text: '简历已清除', type: 'success' });
-  }, []);
+  const handleRemove = useCallback(async (id: string) => {
+    await storage.removeResume(id); await load();
+  }, [load]);
 
   return (
-    <div style={{ width: 360, padding: 20, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151' }}>
+    <div style={{ width: 380, padding: 20, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151' }}>
       <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>🤖 JobMate</h1>
 
       <section style={{ marginBottom: 24 }}>
@@ -73,29 +77,47 @@ export function SettingsForm() {
       </section>
 
       <section style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>我的简历</h2>
-        {resumeFileName ? (
-          <div style={{ padding: 10, background: '#f0faf5', borderRadius: 6, marginBottom: 8 }}>
-            <p style={{ margin: 0, fontSize: 13 }}>📄 {resumeFileName}</p>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#6b7280' }}>{resumeLength} 字符</p>
-            <button onClick={handleClearResume} style={{ marginTop: 6, padding: '4px 10px', background: 'transparent', color: '#dc2626', border: '1px solid #dc2626', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>清除</button>
+        <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>我的简历（可多份）</h2>
+        {resumes.map((r) => (
+          <div key={r.id} onClick={() => handleSelect(r.id)} style={{
+            padding: 10, borderRadius: 6, marginBottom: 6, cursor: 'pointer',
+            background: r.id === selectedId ? '#f0faf5' : '#f9fafb',
+            border: r.id === selectedId ? '2px solid #5ebb8a' : '1px solid #e5e7eb',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 13, fontWeight: r.id === selectedId ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.id === selectedId ? '✅ ' : '📄 '}{r.fileName}
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9ca3af' }}>{r.text.length} 字符</p>
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); handleRemove(r.id); }} style={{
+              background: 'none', border: 'none', color: '#9ca3af', fontSize: 16, cursor: 'pointer', padding: '0 4px',
+            }}>×</button>
           </div>
-        ) : (
-          <label style={{ display: 'block', padding: 20, border: '2px dashed #d1d5db', borderRadius: 8, textAlign: 'center', cursor: 'pointer', color: '#6b7280', fontSize: 13 }}>
-            {parsing ? '解析中...' : '📎 点击上传 PDF 或 DOCX 简历'}
-            <input type="file" accept=".pdf,.docx" onChange={handleFileUpload} disabled={parsing} style={{ display: 'none' }} />
-          </label>
-        )}
+        ))}
+        <label style={{ display: 'block', padding: 14, border: '2px dashed #d1d5db', borderRadius: 8, textAlign: 'center', cursor: 'pointer', color: '#6b7280', fontSize: 13 }}>
+          {parsing ? '⏳ 解析中...' : '＋ 上传 PDF 或 DOCX 简历'}
+          <input type="file" accept=".pdf,.docx" onChange={handleFileUpload} disabled={parsing} style={{ display: 'none' }} />
+        </label>
       </section>
 
-      <section>
-        <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>使用方法</h2>
-        <ol style={{ fontSize: 12, color: '#6b7280', paddingLeft: 18, lineHeight: 1.8 }}>
-          <li>打开 Boss直聘任意职位详情页</li>
-          <li>点击右上角招呼语助手按钮</li>
-          <li>选择侧重点即可生成招呼语</li>
-          <li>点击复制后 Ctrl+V 粘贴到聊天框</li>
-        </ol>
+      <section style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>联系作者</h2>
+        <div style={{ textAlign: 'center' }}>
+          <img src={chrome.runtime.getURL('qrcode.png')} alt="微信二维码" style={{
+            width: 160, height: 160, borderRadius: 8, border: '1px solid #e5e7eb',
+          }} />
+          <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>扫码添加微信</p>
+        </div>
+      </section>
+
+      <section style={{ marginBottom: 24 }}>
+        <a href={FEISHU_URL} target="_blank" style={{
+          display: 'block', padding: 10, borderRadius: 6, background: '#f0f4ff',
+          color: '#2563eb', fontSize: 13, textDecoration: 'none', textAlign: 'center',
+          border: '1px solid #dbeafe',
+        }}>📖 使用文档</a>
       </section>
 
       {message && (
