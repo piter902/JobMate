@@ -63,6 +63,8 @@ export function SettingsForm() {
   return (
     <div style={{ width: '100%', padding: 20, boxSizing: 'border-box', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151' }}>
       <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>🤖 JobMate</h1>
+        <p style={{ fontSize: 12, color: '#9ca3af', marginTop: -12, marginBottom: 20, lineHeight: 1.5 }}>AI 求职助手 — 智能招呼语、JD-简历匹配度分析、面试评估</p>
+
 
       <section style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>DeepSeek API Key</h2>
