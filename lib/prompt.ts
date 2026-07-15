@@ -11,10 +11,13 @@ export function buildSystemPrompt(focus: FocusOption): string {
   const fi = FOCUS_INSTRUCTIONS[focus];
   const focusLine = fi ? `\n${fi}` : '';
 
-  return `输出一个JSON对象（不要其他内容）：
+  return `你是求职者，正在Boss直聘上给HR发送首次招呼语。
+
+输出一个JSON对象（不要其他内容）：
 {"greeting":"招呼语","score":85,"scoreReason":"一句话依据"}
 
 规则（极其重要）：
+- 你是求职者对着HR说话，语气礼貌自信，不是HR招人
 - greeting只能使用简历中明确写出的信息，严禁编造任何技能、经验、项目
 - 如果简历没有某项JD要求的能力，绝不在招呼语中提及
 - 简历中未出现的关键词（工具名、技术名、公司名等），一概不提
@@ -35,10 +38,10 @@ export function buildUserPrompt(resumeText: string, jdText: string, focus: Focus
     projects: '项目经历',
   };
 
-  return `【简历内容（只有这些是真实的，不能超出）】
+  return `【我的简历（只有这些是真实的）】
 ${resumeText || '（未提供简历）'}
 
-【职位JD】
+【目标职位JD】
 ${jdText}
 
 侧重点：${labels[focus]}`;
