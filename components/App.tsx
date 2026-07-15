@@ -31,6 +31,7 @@ export default function App() {
   const [regenerating, setRegenerating] = useState(false);
   const [currentCompany, setCurrentCompany] = useState('');
   const [currentTitle, setCurrentTitle] = useState('');
+  const [currentBoss, setCurrentBoss] = useState('');
   const { toast, showToast, clearToast } = useToast();
 
   const autoFilledRef = useRef(false);
@@ -43,59 +44,39 @@ export default function App() {
   }, []);
 
   const beginPoll = useCallback((text: string) => {
-    stopPoll();
-    autoFilledRef.current = false;
-    greetingRef.current = text;
-    pollStartRef.current = Date.now();
-
+    stopPoll(); autoFilledRef.current = false; greetingRef.current = text; pollStartRef.current = Date.now();
     const tick = () => {
       if (autoFilledRef.current) { stopPoll(); return; }
       if (Date.now() - pollStartRef.current >= POLL_TIMEOUT) { stopPoll(); return; }
-      const input = findInputAnywhere();
-      if (!input) return;
+      const input = findInputAnywhere(); if (!input) return;
       if (getInputValue(input).trim().length > 0) { stopPoll(); return; }
       if (doFill(input, greetingRef.current)) {
-        autoFilledRef.current = true;
-        setAutoFilled(true); setDebug('');
-        stopPoll();
+        autoFilledRef.current = true; setAutoFilled(true); setDebug(''); stopPoll();
         showToast('✅ 已自动填入聊天框', 'success');
       }
     };
-
-    tick();
-    pollTimerRef.current = setInterval(tick, POLL_INTERVAL);
+    tick(); pollTimerRef.current = setInterval(tick, POLL_INTERVAL);
   }, [stopPoll, showToast]);
 
-  // 通用生成函数
   const doGenerate = useCallback(async (
-    jdText: string,
-    focus: FocusOption,
-    company: string,
-    title: string,
+    jdText: string, focus: FocusOption, company: string, title: string, boss: string,
   ): Promise<GreetingResult | null> => {
     const response = (await chrome.runtime.sendMessage({
       type: 'GENERATE_GREETING', jdText, focus,
     })) as GenerateGreetingResponse;
-    if (response.error) {
-      setDebug('❌ ' + response.error);
-      setStatus('error');
-      return null;
-    }
+    if (response.error) { setDebug('❌ ' + response.error); setStatus('error'); return null; }
     const r = response.result!;
     setResult(r); setStatus('ready');
     try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
-
-    // 保存历史（含 JD）
     try {
       if (company || title) {
         await saveGreeting({
-          company: company || title, jobTitle: title || '',
+          company: company || title, jobTitle: title || '', bossName: boss || '',
           jdText, greeting: r.greeting, score: r.score,
           scoreReason: r.scoreReason, time: Date.now(),
         });
       }
     } catch {}
-
     await copyText(r.greeting); setCopied(true);
     beginPoll(r.greeting);
     return r;
@@ -107,42 +88,30 @@ export default function App() {
         const r = await chrome.storage.local.get('deepseekApiKey');
         setNeedsSetup(!r.deepseekApiKey);
 
-        // 1. sessionStorage 缓存
         const cached = sessionStorage.getItem(CACHE_KEY);
         if (cached) {
           setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false);
-          setPageMode('generate');
-          beginPoll(JSON.parse(cached).greeting);
+          setPageMode('generate'); beginPoll(JSON.parse(cached).greeting);
           return;
         }
 
-        // 2. 提取当前页面的公司+岗位
-        const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
+        const { extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
         const company = extractCompany();
-        const title = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title || "?"})`);
-        setCurrentCompany(company); setCurrentTitle(title);
+        const title = extractJobTitle();
+        const boss = extractBossName();
+        setCurrentCompany(company); setCurrentTitle(title); setCurrentBoss(boss);
 
-        if (!company && !title) return;
+        if (!company && !title && !boss) return;
 
-        // 3. 检查是否有 JD（能生成新招呼语）
         const { extractJD } = await import('@/lib/jd-extractor');
         const jdText = extractJD();
 
-        if (jdText) {
-          // 有 JD → 页面模式，等用户手动点生成
-          setPageMode('generate');
-          return;
-        }
+        if (jdText) { setPageMode('generate'); return; }
 
-        // 4. 无 JD → 从历史匹配
-        const record = await findMatch(company, title);
+        const record = await findMatch(company, title, boss);
         if (record) {
-          setResult({
-            greeting: record.greeting, score: record.score,
-            scoreReason: record.scoreReason || `历史记录 · ${record.company}`,
-          });
-          setStatus('ready'); setCollapsed(false);
-          setPageMode('history');
+          setResult({ greeting: record.greeting, score: record.score, scoreReason: record.scoreReason || `历史记录 · ${record.company || record.bossName}` });
+          setStatus('ready'); setCollapsed(false); setPageMode('history');
           await copyText(record.greeting); setCopied(true);
           beginPoll(record.greeting);
         }
@@ -154,21 +123,20 @@ export default function App() {
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setCollapsed(false); setDebug('⏳ 分析中...');
     setStatus('loading'); setResult(null); setCopied(false);
-    setAutoFilled(false); autoFilledRef.current = false;
-    stopPoll();
+    setAutoFilled(false); autoFilledRef.current = false; stopPoll();
 
     try {
-      const { extractJD } = await import('@/lib/jd-extractor');
+      const { extractJD, extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
       if (!jdText) { setDebug('❌ 未检测到职位描述'); setStatus('error'); return; }
-      setDebug('⏳ 分析匹配度...');
 
-      const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
       const company = extractCompany();
-      const title = extractJobTitle(); setDebug(`⏳ 分析匹配度... (${company || "?"} · ${title || "?"})`);
-      setCurrentCompany(company); setCurrentTitle(title);
+      const title = extractJobTitle();
+      const boss = extractBossName();
+      setCurrentCompany(company); setCurrentTitle(title); setCurrentBoss(boss);
+      setDebug(`⏳ 分析匹配度... (${company || '?'} · ${title || '?'})`);
 
-      await doGenerate(jdText, focus, company, title);
+      await doGenerate(jdText, focus, company, title, boss);
       track('greeting_button_clicked', { focus });
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
@@ -177,31 +145,16 @@ export default function App() {
   }, [stopPoll, doGenerate]);
 
   const handleRegenerate = useCallback(async (focus: FocusOption = 'none') => {
-    stopPoll();
-    setRegenerating(true);
-    setDebug('⏳ 重新生成中...');
-
+    stopPoll(); setRegenerating(true); setDebug('⏳ 重新生成中...');
     try {
-      const record = await findMatch(currentCompany, currentTitle);
-      if (!record?.jdText) {
-        setDebug('❌ 未找到缓存的 JD，无法重新生成');
-        setRegenerating(false);
-        return;
-      }
-
-      const r = await doGenerate(record.jdText, focus, currentCompany, currentTitle);
-      if (r) {
-        await updateRecord(currentCompany, currentTitle, {
-          greeting: r.greeting, score: r.score,
-          scoreReason: r.scoreReason, time: Date.now(),
-        });
-      }
+      const record = await findMatch(currentCompany, currentTitle, currentBoss);
+      if (!record?.jdText) { setDebug('❌ 未找到缓存的 JD'); setRegenerating(false); return; }
+      const r = await doGenerate(record.jdText, focus, currentCompany, currentTitle, currentBoss);
+      if (r) await updateRecord(currentCompany, currentTitle, currentBoss, { greeting: r.greeting, score: r.score, scoreReason: r.scoreReason, time: Date.now() });
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
-    } finally {
-      setRegenerating(false);
-    }
-  }, [currentCompany, currentTitle, stopPoll, doGenerate]);
+    } finally { setRegenerating(false); }
+  }, [currentCompany, currentTitle, currentBoss, stopPoll, doGenerate]);
 
   const handleCopy = useCallback(async () => {
     if (!result) return;
@@ -213,12 +166,9 @@ export default function App() {
     if (!result) return;
     const input = findInputAnywhere();
     if (input && doFill(input, result.greeting)) {
-      stopPoll(); autoFilledRef.current = true;
-      setAutoFilled(true); setDebug('');
+      stopPoll(); autoFilledRef.current = true; setAutoFilled(true); setDebug('');
       showToast('✅ 已填入', 'success');
-    } else {
-      handleCopy();
-    }
+    } else { handleCopy(); }
   }, [result, handleCopy, stopPoll, showToast]);
 
   const hasInput = findInputAnywhere() !== null;
@@ -249,9 +199,7 @@ export default function App() {
           background: regenerating ? '#fffbeb' : '#fff', color: regenerating ? '#d97706' : '#f59e0b',
           fontSize: 13, fontWeight: 500, cursor: needsSetup ? 'not-allowed' : 'pointer',
           opacity: needsSetup ? 0.5 : 1, marginBottom: 8,
-        }}>
-          {regenerating ? '⏳ 重新生成中...' : '🔄 重新生成招呼语'}
-        </button>
+        }}>{regenerating ? '⏳ 重新生成中...' : '🔄 重新生成招呼语'}</button>
       )}
 
       {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : '#2563eb' }}>{debug}</div>}

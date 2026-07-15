@@ -129,3 +129,15 @@ function isExcluded(el: Element): boolean {
 
 function containsJD(text: string): boolean { return JD_KEYWORDS.some(k => text.includes(k)); }
 function clean(text: string): string { return text.replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim(); }
+
+// ---- 发布人（Boss名）- 聊天页/详情页 ----
+export function extractBossName(): string {
+  // 聊天页当前对话的boss名
+  for (const sel of ['.name-text', '.boss-name', '[class*="boss"] [class*="name"]']) {
+    for (const el of document.querySelectorAll(sel)) {
+      const text = (el.textContent || '').trim();
+      if (text.length >= 2 && text.length <= 20) return text;
+    }
+  }
+  return '';
+}
