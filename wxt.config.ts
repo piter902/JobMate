@@ -24,9 +24,22 @@ export default defineConfig({
         run_at: 'document_start' as const,
       },
     ],
+    icons: {
+      16: 'icons/icon-16.png',
+      32: 'icons/icon-32.png',
+      48: 'icons/icon-48.png',
+      128: 'icons/icon-128.png',
+    },
+
     action: {
       default_title: '智能招呼语助手',
       default_popup: 'popup.html',
+      default_icon: {
+        16: 'icons/icon-16.png',
+        32: 'icons/icon-32.png',
+        48: 'icons/icon-48.png',
+        128: 'icons/icon-128.png',
+      },
     },
   },
 });
