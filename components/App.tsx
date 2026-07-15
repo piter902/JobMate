@@ -3,10 +3,11 @@ import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
 import type { FocusOption, GenerateGreetingResponse, GreetingResult } from '@/lib/types';
 import { track } from '@/lib/analytics';
+import { saveGreeting, findMatch } from '@/lib/history';
 
 const CACHE_KEY = 'ga_result';
-const POLL_INTERVAL = 100;   // 每100ms轮询一次
-const POLL_TIMEOUT = 5000;   // 5秒后放弃
+const POLL_INTERVAL = 100;
+const POLL_TIMEOUT = 5000;
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -29,56 +30,72 @@ export default function App() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef(0);
 
-  // 清理轮询
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }, []);
 
   useEffect(() => {
     chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
+
+    // 1. 先尝试从 sessionStorage 恢复
     try {
       const cached = sessionStorage.getItem(CACHE_KEY);
       if (cached) {
         const r = JSON.parse(cached) as GreetingResult;
         setResult(r); setStatus('ready'); setCollapsed(false);
         startPolling(r.greeting);
+        return;
       }
     } catch {}
+
+    // 2. 没有缓存 → 尝试从历史匹配（聊天页场景）
+    tryMatchHistory();
+
     return stopPolling;
   }, []);
+
+  const tryMatchHistory = useCallback(async () => {
+    const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
+    const company = extractCompany();
+    const title = extractJobTitle();
+
+    if (!company && !title) {
+      setDebug('ℹ 未检测到公司或岗位信息');
+      return;
+    }
+
+    setDebug(`🔍 查找"${company || title}"的历史招呼语...`);
+    const record = await findMatch(company, title);
+
+    if (record) {
+      setResult({
+        greeting: record.greeting,
+        score: record.score,
+        scoreReason: record.scoreReason || `历史记录 · ${record.company}`,
+      });
+      setStatus('ready');
+      setCollapsed(false);
+      setDebug('✅ 已匹配历史招呼语');
+
+      // 尝试自动填入
+      await copyText(record.greeting);
+      setCopied(true);
+      startPolling(record.greeting);
+    } else {
+      setDebug('');
+    }
+  }, [startPolling]);
 
   const startPolling = useCallback((text: string) => {
     stopPolling();
     startTimeRef.current = Date.now();
-
     pollRef.current = setInterval(() => {
-      const elapsed = Date.now() - startTimeRef.current;
-
-      // 超时，提示手动粘贴
-      if (elapsed >= POLL_TIMEOUT) {
-        stopPolling();
-        setDebug('');
-        return;
-      }
-
-      // 找到输入框
+      if (Date.now() - startTimeRef.current >= POLL_TIMEOUT) { stopPolling(); setDebug(''); return; }
       const input = findInputAnywhere();
       if (!input) return;
-
-      // 输入框已有用户手动输入的内容 → 不覆盖
-      const currentVal = getInputValue(input);
-      if (currentVal.trim().length > 0) {
-        stopPolling();
-        setDebug('');
-        return;
-      }
-
-      // 填入
-      const ok = doFill(input, text);
-      if (ok) {
-        stopPolling();
-        setAutoFilled(true);
-        setDebug('');
+      if (getInputValue(input).trim().length > 0) { stopPolling(); setDebug(''); return; }
+      if (doFill(input, text)) {
+        stopPolling(); setAutoFilled(true); setDebug('');
         showToast('✅ 已自动填入聊天框', 'success');
         try { sessionStorage.removeItem(CACHE_KEY); } catch {}
       }
@@ -89,13 +106,11 @@ export default function App() {
     setCollapsed(false);
     setDebug('⏳ 分析中...');
     setStatus('loading');
-    setResult(null);
-    setCopied(false);
-    setAutoFilled(false);
+    setResult(null); setCopied(false); setAutoFilled(false);
     stopPolling();
 
     try {
-      const { extractJD } = await import('@/lib/jd-extractor');
+      const { extractJD, extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
       if (!jdText) { setDebug('❌ 未检测到职位描述'); setStatus('error'); return; }
 
@@ -111,11 +126,24 @@ export default function App() {
       setStatus('ready');
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
 
+      // 保存到历史
+      const company = extractCompany();
+      const title = extractJobTitle();
+      if (company || title) {
+        await saveGreeting({
+          company: company || title,
+          jobTitle: title || '',
+          greeting: r.greeting,
+          score: r.score,
+          scoreReason: r.scoreReason,
+          time: Date.now(),
+        });
+      }
+
       track('greeting_button_clicked', { focus });
       await copyText(r.greeting);
       setCopied(true);
       setDebug('⏳ 正在尝试自动填入...');
-
       startPolling(r.greeting);
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
@@ -162,7 +190,7 @@ export default function App() {
         <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           color: debug.startsWith('❌') ? '#dc2626' :
-            debug.startsWith('⏳') ? '#2563eb' : '#16a34a' }}>{debug}</div>
+            debug.startsWith('⏳') || debug.startsWith('🔍') ? '#2563eb' : '#16a34a' }}>{debug}</div>
       )}
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340,
@@ -212,11 +240,8 @@ export default function App() {
   );
 }
 
-// ---- 输入框查找 & 填入 ----
-
 function findInputAnywhere(): HTMLElement | null {
-  let el = findInput(document);
-  if (el) return el;
+  let el = findInput(document); if (el) return el;
   for (const iframe of document.querySelectorAll('iframe')) {
     try {
       const doc = iframe.contentDocument || iframe.contentWindow?.document;

@@ -116,3 +116,36 @@ function containsJD(text: string): boolean {
 function clean(text: string): string {
   return text.replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
+
+// ---- 公司名 & 岗位名提取 ----
+
+export function extractCompany(): string {
+  const selectors = [
+    '.job-detail .company-name', '.job-detail .name',
+    '.job-sec .company', '.biz-name',
+    '[class*="company"] [class*="name"]',
+    '[class*="biz"] [class*="name"]',
+    '.name-box .name',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    const text = el?.textContent?.trim();
+    if (text && text.length >= 2 && text.length <= 60) return text;
+  }
+  return '';
+}
+
+export function extractJobTitle(): string {
+  const selectors = [
+    '.job-detail .job-name', '.job-detail .title',
+    '.job-sec .name', '.detail-top .name h1',
+    '[class*="job"] [class*="name"]', '[class*="job"] [class*="title"]',
+    'h1', '.name h1',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    const text = el?.textContent?.trim();
+    if (text && text.length >= 2 && text.length <= 80) return text;
+  }
+  return '';
+}
