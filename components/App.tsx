@@ -5,6 +5,8 @@ import type { FocusOption, GenerateGreetingResponse, GreetingResult } from '@/li
 import { track } from '@/lib/analytics';
 
 const CACHE_KEY = 'ga_result';
+const POLL_INTERVAL = 100;   // 每100ms轮询一次
+const POLL_TIMEOUT = 5000;   // 5秒后放弃
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -24,7 +26,13 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [autoFilled, setAutoFilled] = useState(false);
   const { toast, showToast, clearToast } = useToast();
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef(0);
+
+  // 清理轮询
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }, []);
 
   useEffect(() => {
     chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
@@ -33,26 +41,49 @@ export default function App() {
       if (cached) {
         const r = JSON.parse(cached) as GreetingResult;
         setResult(r); setStatus('ready'); setCollapsed(false);
-        // 恢复后也尝试自动填入
-        scheduleAutoFill(r.greeting);
+        startPolling(r.greeting);
       }
     } catch {}
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    return stopPolling;
   }, []);
 
-  const scheduleAutoFill = useCallback((text: string) => {
-    // 等 3 秒让聊天 iframe 完全加载，然后尝试填入
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      const ok = tryAutoFill(text);
+  const startPolling = useCallback((text: string) => {
+    stopPolling();
+    startTimeRef.current = Date.now();
+
+    pollRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTimeRef.current;
+
+      // 超时，提示手动粘贴
+      if (elapsed >= POLL_TIMEOUT) {
+        stopPolling();
+        setDebug('');
+        return;
+      }
+
+      // 找到输入框
+      const input = findInputAnywhere();
+      if (!input) return;
+
+      // 输入框已有用户手动输入的内容 → 不覆盖
+      const currentVal = getInputValue(input);
+      if (currentVal.trim().length > 0) {
+        stopPolling();
+        setDebug('');
+        return;
+      }
+
+      // 填入
+      const ok = doFill(input, text);
       if (ok) {
+        stopPolling();
         setAutoFilled(true);
-        setDebug('✅ 已自动填入');
+        setDebug('');
         showToast('✅ 已自动填入聊天框', 'success');
         try { sessionStorage.removeItem(CACHE_KEY); } catch {}
       }
-    }, 3000);
-  }, [showToast]);
+    }, POLL_INTERVAL);
+  }, [stopPolling, showToast]);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setCollapsed(false);
@@ -61,6 +92,7 @@ export default function App() {
     setResult(null);
     setCopied(false);
     setAutoFilled(false);
+    stopPolling();
 
     try {
       const { extractJD } = await import('@/lib/jd-extractor');
@@ -76,21 +108,20 @@ export default function App() {
 
       const r = response.result!;
       setResult(r);
-      setDebug('');
       setStatus('ready');
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
 
-      // 复制 + 尝试自动填入
       track('greeting_button_clicked', { focus });
       await copyText(r.greeting);
       setCopied(true);
+      setDebug('⏳ 正在尝试自动填入...');
 
-      scheduleAutoFill(r.greeting);
+      startPolling(r.greeting);
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
     }
-  }, [scheduleAutoFill]);
+  }, [stopPolling, startPolling]);
 
   const handleCopy = useCallback(async () => {
     if (!result) return;
@@ -130,7 +161,8 @@ export default function App() {
       {debug && (
         <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4,
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          color: debug.startsWith('❌') ? '#dc2626' : '#2563eb' }}>{debug}</div>
+          color: debug.startsWith('❌') ? '#dc2626' :
+            debug.startsWith('⏳') ? '#2563eb' : '#16a34a' }}>{debug}</div>
       )}
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340,
@@ -180,24 +212,18 @@ export default function App() {
   );
 }
 
-// ---- 自动填入 ----
+// ---- 输入框查找 & 填入 ----
 
-function tryAutoFill(text: string): boolean {
-  // 1. 主文档
+function findInputAnywhere(): HTMLElement | null {
   let el = findInput(document);
-  if (el) return doFill(el, text);
-
-  // 2. 同源 iframe（静默跳过跨域的）
+  if (el) return el;
   for (const iframe of document.querySelectorAll('iframe')) {
     try {
       const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!doc) continue;
-      el = findInput(doc);
-      if (el) return doFill(el, text);
-    } catch { /* 跨域 iframe，跳过 */ }
+      if (doc) { el = findInput(doc); if (el) return el; }
+    } catch {}
   }
-
-  return false;
+  return null;
 }
 
 function findInput(doc: Document): HTMLElement | null {
@@ -206,6 +232,11 @@ function findInput(doc: Document): HTMLElement | null {
     if (he.offsetHeight > 20 && he.offsetWidth > 50) return he;
   }
   return null;
+}
+
+function getInputValue(el: HTMLElement): string {
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) return el.value;
+  return el.textContent || '';
 }
 
 function doFill(el: HTMLElement, text: string): boolean {
