@@ -29,6 +29,7 @@ export default function App() {
   const [autoFilled, setAutoFilled] = useState(false);
   const [pageMode, setPageMode] = useState<PageMode>('generate');
   const [regenerating, setRegenerating] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
   const [currentCompany, setCurrentCompany] = useState('');
   const [currentTitle, setCurrentTitle] = useState('');
   const [currentBoss, setCurrentBoss] = useState('');
@@ -82,11 +83,44 @@ export default function App() {
     return r;
   }, [beginPoll]);
 
+  // 从缓存查找招呼语
+  const lookupCache = useCallback(async () => {
+    setLookingUp(true); setDebug('🔍 查找缓存...');
+    try {
+      const { extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
+      const company = extractCompany();
+      const title = extractJobTitle();
+      const boss = extractBossName();
+      setCurrentCompany(company); setCurrentTitle(title); setCurrentBoss(boss);
+
+      if (!company && !title && !boss) {
+        setDebug('❌ 未检测到当前页面的公司/岗位/发布人信息');
+        setLookingUp(false);
+        return;
+      }
+
+      const record = await findMatch(company, title, boss);
+      if (record) {
+        setResult({
+          greeting: record.greeting, score: record.score,
+          scoreReason: record.scoreReason || `缓存记录 · ${record.company || record.bossName} · ${record.jobTitle}`,
+        });
+        setStatus('ready'); setCollapsed(false); setPageMode('history');
+        await copyText(record.greeting); setCopied(true);
+        beginPoll(record.greeting);
+        setDebug('✅ 已匹配缓存 (' + (record.company || record.bossName) + ' · ' + record.jobTitle + ')');
+      } else {
+        setDebug('ℹ 未匹配到缓存 (' + [company, title, boss].filter(Boolean).join(' · ') + ')');
+      }
+    } catch (err) {
+      setDebug('❌ ' + (err instanceof Error ? err.message : '查找失败'));
+    } finally { setLookingUp(false); }
+  }, [beginPoll]);
+
   useEffect(() => {
     (async () => {
       try {
-        const r = await chrome.storage.local.get('deepseekApiKey');
-        setNeedsSetup(!r.deepseekApiKey);
+        chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
 
         const cached = sessionStorage.getItem(CACHE_KEY);
         if (cached) {
@@ -95,6 +129,7 @@ export default function App() {
           return;
         }
 
+        // 自动尝试匹配缓存
         const { extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
         const company = extractCompany();
         const title = extractJobTitle();
@@ -105,7 +140,6 @@ export default function App() {
 
         const { extractJD } = await import('@/lib/jd-extractor');
         const jdText = extractJD();
-
         if (jdText) { setPageMode('generate'); return; }
 
         const record = await findMatch(company, title, boss);
@@ -128,7 +162,7 @@ export default function App() {
     try {
       const { extractJD, extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
       const jdText = extractJD();
-      if (!jdText) { setDebug('❌ 未检测到职位描述'); setStatus('error'); return; }
+      if (!jdText) { setDebug('❌ 未检测到职位描述，请尝试 🔍从缓存查找'); setStatus('error'); return; }
 
       const company = extractCompany();
       const title = extractJobTitle();
@@ -189,20 +223,29 @@ export default function App() {
         <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 4, color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px' }}>收起</button>
       </div>
 
-      {pageMode === 'generate' && (
-        <GreetingButton onGenerate={handleGenerate} loading={status === 'loading'} disabled={needsSetup} disabledReason={needsSetup ? '请先设置 API Key' : undefined} />
-      )}
-
-      {pageMode === 'history' && (
-        <button onClick={() => handleRegenerate('none')} disabled={regenerating || needsSetup} style={{
-          padding: '6px 14px', border: '1px solid #f59e0b', borderRadius: 6,
-          background: regenerating ? '#fffbeb' : '#fff', color: regenerating ? '#d97706' : '#f59e0b',
+      {/* 操作按钮区 */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: pageMode === 'generate' ? 0 : 0 }}>
+        {pageMode === 'generate' && (
+          <GreetingButton onGenerate={handleGenerate} loading={status === 'loading'} disabled={needsSetup} disabledReason={needsSetup ? '请先设置 API Key' : undefined} />
+        )}
+        {pageMode === 'history' && (
+          <button onClick={() => handleRegenerate('none')} disabled={regenerating || needsSetup} style={{
+            padding: '6px 14px', border: '1px solid #f59e0b', borderRadius: 6,
+            background: regenerating ? '#fffbeb' : '#fff', color: regenerating ? '#d97706' : '#f59e0b',
+            fontSize: 13, fontWeight: 500, cursor: needsSetup ? 'not-allowed' : 'pointer',
+            opacity: needsSetup ? 0.5 : 1,
+          }}>{regenerating ? '⏳ 重新生成中...' : '🔄 重新生成招呼语'}</button>
+        )}
+        {/* 从缓存查找按钮 — 所有页面都显示 */}
+        <button onClick={lookupCache} disabled={lookingUp || needsSetup} style={{
+          padding: '6px 12px', border: '1px solid #8b5cf6', borderRadius: 6,
+          background: lookingUp ? '#f5f3ff' : '#fff', color: lookingUp ? '#7c3aed' : '#8b5cf6',
           fontSize: 13, fontWeight: 500, cursor: needsSetup ? 'not-allowed' : 'pointer',
-          opacity: needsSetup ? 0.5 : 1, marginBottom: 8,
-        }}>{regenerating ? '⏳ 重新生成中...' : '🔄 重新生成招呼语'}</button>
-      )}
+          opacity: needsSetup ? 0.5 : 1, whiteSpace: 'nowrap',
+        }}>{lookingUp ? '🔍 查找中...' : '🔍 从缓存查找'}</button>
+      </div>
 
-      {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : '#2563eb' }}>{debug}</div>}
+      {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#2563eb' }}>{debug}</div>}
 
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
