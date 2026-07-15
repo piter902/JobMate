@@ -92,8 +92,20 @@ export function buildExtractAndGeneratePrompt(pageText: string, focus: FocusOpti
    - matched=true → evidence写"简历中：{具体匹配内容}"
    - matched=false → evidence写"简历中无此项"
 
-3. 评分：score = round((matchedCount / totalCount) * 100)
+3. 评分公式：score = round((matchedCount / totalCount) * 100)
    例如：8个维度中6个匹配 → 75分
+
+3.1 技术岗位特殊规则（极其重要）：
+   - 技术岗包括：前端、后端、算法、数据、运维、测试、嵌入式、硬件、架构等
+   - 判断标准：如果JD岗位和简历的核心技术栈完全不同 → 直接0分
+     例：简历是前端(Vue/React)投后端(Java/Spring) → 0分
+     例：简历是Java投Python → 0分
+   - 如果核心技能一致只是部分技术不同 → 正常按维度打分
+   - 如果JD明确写了"接受转技术栈"或类似表述 → 正常打分
+
+3.2 通用岗位：
+   - 通用岗包括：行政、人事、HR、财务、会计、运营、销售、市场、客服、文员等
+   - 按维度正常打分，对技能匹配不做严格限制
 
 4. 招呼语规则（极其重要）：
    - 你是求职者给HR发消息
