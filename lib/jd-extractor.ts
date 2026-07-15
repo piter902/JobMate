@@ -1,4 +1,4 @@
-// Boss直聘 JD 提取器 —— 基于真实 DOM 分析
+// Boss直聘 JD/公司/岗位提取器 —— 兼容列表页和详情页
 
 const DETAIL_SELECTORS = [
   '.job-sec .job-sec-text',
@@ -17,7 +17,7 @@ const LIST_SELECTORS = [
   '[class*="job-card"] [class*="info"]',
 ];
 
-const EXCLUDE = ['[class*="recommend"]', '[class*="related"]', '[class*="sidebar"]', '[class*="guess"]'];
+const EXCLUDE = ['[class*="recommend"]', '[class*="related"]', '[class*="sidebar"]', '[class*="guess"]', '[class*="similar"]'];
 const JD_KEYWORDS = ['任职要求', '岗位职责', '职位描述', '工作内容', '能力要求', '任职资格', '岗位要求', '职位要求'];
 const MIN_LEN = 50;
 
@@ -39,7 +39,7 @@ export function extractJD(): string | null {
   }
 
   const scope = document.querySelector('main, [role="main"], .main, .container') || document.body;
-  const candidates = [];
+  const candidates: Array<{ len: number; text: string }> = [];
   for (const el of scope.querySelectorAll('div, section, article')) {
     if (isExcluded(el) || el.children.length > 10) continue;
     const text = clean(el.textContent || '');
@@ -52,10 +52,11 @@ export function extractJD(): string | null {
   return null;
 }
 
-// ---- 公司名 (boss-name) ----
+// ---- 公司名 ----
+// 列表页: .boss-name    详情页: .boss-info-attr
 
 export function extractCompany(): string {
-  for (const sel of ['.boss-name', '[class*="boss-name"]']) {
+  for (const sel of ['.boss-info-attr', '.boss-name', '[class*="boss-name"]']) {
     for (const el of document.querySelectorAll(sel)) {
       const text = (el.textContent || '').trim();
       if (text.length >= 2 && text.length <= 50) return text;
@@ -64,24 +65,39 @@ export function extractCompany(): string {
   return '';
 }
 
-// ---- 岗位名 (job-name) ----
+// ---- 岗位名 ----
+// 详情页: h1 或 .job-title    列表页: .job-name
 
 export function extractJobTitle(): string {
-  for (const sel of ['.job-name', '[class*="job-name"]']) {
-    for (const el of document.querySelectorAll(sel)) {
-      const raw = (el.textContent || '').trim();
-      const text = raw.replace(/\s*\d{1,3}-\d{1,3}[kK](\s*·\s*\d+薪)?/, '').replace(/\s*\d{1,2}[kK]-\d{1,2}[kK]/, '').trim();
-      if (text.length >= 2 && text.length <= 60) return text;
-    }
+  // 详情页优先 h1
+  for (const el of document.querySelectorAll('h1')) {
+    const raw = (el.textContent || '').trim();
+    const text = stripSalary(raw);
+    if (text.length >= 2 && text.length <= 60) return text;
+  }
+  // .job-title (详情页)
+  for (const el of document.querySelectorAll('.job-title, [class*="job-title"]')) {
+    const raw = (el.textContent || '').trim();
+    const text = stripSalary(raw);
+    if (text.length >= 2 && text.length <= 60) return text;
+  }
+  // .job-name (列表页)
+  for (const el of document.querySelectorAll('.job-name, [class*="job-name"]')) {
+    const raw = (el.textContent || '').trim();
+    const text = stripSalary(raw);
+    if (text.length >= 2 && text.length <= 60) return text;
   }
   return '';
+}
+
+function stripSalary(text: string): string {
+  return text.replace(/\s*\d{1,3}-\d{1,3}[kK](\s*·\s*\d+薪)?/, '').replace(/\s*\d{1,2}[kK]-\d{1,2}[kK]/, '').trim();
 }
 
 // ---- 工具 ----
 
 function isListingPage(): boolean {
-  const cards = document.querySelectorAll('[class*="job-card"]');
-  return cards.length >= 2 || /web\/geek|search|query/.test(location.pathname);
+  return document.querySelectorAll('[class*="job-card"]').length >= 2;
 }
 
 function findChatButton(): Element | null {
