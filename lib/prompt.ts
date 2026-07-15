@@ -46,3 +46,46 @@ ${jdText}
 
 侧重点：${labels[focus]}`;
 }
+
+// 从页面文本提取信息并生成招呼语（一次调用）
+export function buildExtractAndGeneratePrompt(pageText: string, focus: FocusOption, resumeText: string): {
+  system: string;
+  user: string;
+} {
+  const focusMap: Record<FocusOption, string> = {
+    none: '通用',
+    experience: '经验匹配',
+    skills: '技能',
+    projects: '项目经历',
+  };
+
+  return {
+    system: `你是求职者的AI助手。从Boss直聘页面文本中提取关键信息，并生成招呼语。
+
+返回JSON（不要其他内容）：
+{
+  "company": "公司名称",
+  "jobTitle": "岗位名称",
+  "bossName": "HR/发布人姓名",
+  "jdText": "职位描述原文（从页面文本中截取，不要修改）",
+  "greeting": "招呼语文字",
+  "score": 85,
+  "scoreReason": "评分依据"
+}
+
+规则：
+- company/jobTitle/bossName: 从页面文本中识别，找不到就填空字符串""
+- jdText: 原文截取任职要求/岗位职责/职位描述部分，不改动文字
+- greeting: 你是求职者给HR发消息,50-150字,只用简历中的真实信息,不编造
+- score: 0-100,综合技能/经验/学历匹配度
+- scoreReason: 一句话`,
+
+    user: `【我的简历】
+${resumeText || '（未提供）'}
+
+【Boss直聘页面文本】
+${pageText.slice(0, 4000)}
+
+侧重点：${focusMap[focus]}`,
+  };
+}
