@@ -27,12 +27,48 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [autoFilled, setAutoFilled] = useState(false);
   const { toast, showToast, clearToast } = useToast();
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef(0);
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  // 用 ref 避免闭包问题
+  const autoFilledRef = useRef(false);
+  const greetingRef = useRef('');
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartRef = useRef(0);
+
+  const stopPoll = useCallback(() => {
+    if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
   }, []);
+
+  const beginPoll = useCallback((text: string) => {
+    stopPoll();
+    autoFilledRef.current = false;
+    greetingRef.current = text;
+    pollStartRef.current = Date.now();
+
+    const tick = () => {
+      if (autoFilledRef.current) { stopPoll(); return; }
+
+      if (Date.now() - pollStartRef.current >= POLL_TIMEOUT) {
+        stopPoll();
+        return;
+      }
+
+      const input = findInputAnywhere();
+      if (!input) return;
+      if (getInputValue(input).trim().length > 0) { stopPoll(); return; }
+
+      if (doFill(input, greetingRef.current)) {
+        autoFilledRef.current = true;
+        setAutoFilled(true);
+        setDebug('');
+        stopPoll();
+        showToast('✅ 已自动填入聊天框', 'success');
+        try { sessionStorage.removeItem(CACHE_KEY); } catch {}
+      }
+    };
+
+    tick(); // 立即试一次
+    pollTimerRef.current = setInterval(tick, POLL_INTERVAL);
+  }, [stopPoll, showToast]);
 
   useEffect(() => {
     (async () => {
@@ -40,61 +76,36 @@ export default function App() {
         const r = await chrome.storage.local.get('deepseekApiKey');
         setNeedsSetup(!r.deepseekApiKey);
 
-        // 1. 从 sessionStorage 恢复
         const cached = sessionStorage.getItem(CACHE_KEY);
         if (cached) {
-          setResult(JSON.parse(cached));
-          setStatus('ready');
-          setCollapsed(false);
-          startPolling(JSON.parse(cached).greeting);
+          const parsed = JSON.parse(cached) as GreetingResult;
+          setResult(parsed); setStatus('ready'); setCollapsed(false);
+          beginPoll(parsed.greeting);
           return;
         }
 
-        // 2. 从历史匹配
         const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
         const company = extractCompany();
         const title = extractJobTitle();
         if (company || title) {
           const record = await findMatch(company, title);
           if (record) {
-            setResult({
-              greeting: record.greeting,
-              score: record.score,
-              scoreReason: record.scoreReason || `历史记录 · ${record.company}`,
-            });
-            setStatus('ready');
-            setCollapsed(false);
-            await copyText(record.greeting);
-            setCopied(true);
-            startPolling(record.greeting);
+            setResult({ greeting: record.greeting, score: record.score, scoreReason: record.scoreReason || `历史记录 · ${record.company}` });
+            setStatus('ready'); setCollapsed(false);
+            await copyText(record.greeting); setCopied(true);
+            beginPoll(record.greeting);
           }
         }
-      } catch { /* mount 阶段异常静默 */ }
+      } catch {}
     })();
-
-    return stopPolling;
+    return stopPoll;
   }, []);
-
-  const startPolling = useCallback((text: string) => {
-    stopPolling();
-    startTimeRef.current = Date.now();
-    pollRef.current = setInterval(() => {
-      if (Date.now() - startTimeRef.current >= POLL_TIMEOUT) { stopPolling(); return; }
-      const input = findInputAnywhere();
-      if (!input) return;
-      if (getInputValue(input).trim().length > 0) { stopPolling(); return; }
-      if (doFill(input, text)) {
-        stopPolling(); setAutoFilled(true);
-        showToast('✅ 已自动填入聊天框', 'success');
-        try { sessionStorage.removeItem(CACHE_KEY); } catch {}
-      }
-    }, POLL_INTERVAL);
-  }, [stopPolling, showToast]);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
     setCollapsed(false); setDebug('⏳ 分析中...');
-    setStatus('loading'); setResult(null); setCopied(false); setAutoFilled(false);
-    stopPolling();
+    setStatus('loading'); setResult(null); setCopied(false);
+    setAutoFilled(false); autoFilledRef.current = false;
+    stopPoll();
 
     try {
       const { extractJD, extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
@@ -111,7 +122,6 @@ export default function App() {
       setResult(r); setStatus('ready');
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
 
-      // 保存历史
       try {
         const company = extractCompany();
         const title = extractJobTitle();
@@ -121,27 +131,22 @@ export default function App() {
       } catch {}
 
       track('greeting_button_clicked', { focus });
-      await copyText(r.greeting);
-      setCopied(true);
-      setDebug('⏳ 正在尝试自动填入...');
-      startPolling(r.greeting);
+      await copyText(r.greeting); setCopied(true);
+      beginPoll(r.greeting);
     } catch (err) {
       setDebug('❌ ' + (err instanceof Error ? err.message : '网络错误'));
       setStatus('error');
     }
-  }, [stopPolling, startPolling]);
+  }, [stopPoll, beginPoll]);
 
   const handleCopy = useCallback(async () => {
     if (!result) return;
-    const ok = await copyText(result.greeting);
-    setCopied(ok);
-    showToast(ok ? '✅ 已复制' : '复制失败', ok ? 'success' : 'error');
+    await copyText(result.greeting); setCopied(true);
+    showToast('✅ 已复制', 'success');
   }, [result, showToast]);
 
   if (collapsed) {
-    return (
-      <button onClick={() => setCollapsed(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: '#5ebb8a', color: '#fff', border: 'none', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🤖</button>
-    );
+    return <button onClick={() => setCollapsed(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: '#5ebb8a', color: '#fff', border: 'none', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🤖</button>;
   }
 
   const s = result?.score ?? -1;
@@ -151,7 +156,7 @@ export default function App() {
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <span style={{ fontSize: 12, color: '#9ca3af' }}>招呼语助手</span>
-        <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 4, color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>收起</button>
+        <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 4, color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px' }}>收起</button>
       </div>
       <GreetingButton onGenerate={handleGenerate} loading={status === 'loading'} disabled={needsSetup} disabledReason={needsSetup ? '请先设置 API Key' : undefined} />
       {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : '#2563eb' }}>{debug}</div>}
