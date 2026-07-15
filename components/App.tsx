@@ -84,7 +84,7 @@ export default function App() {
       if (!company && !title && !boss) { setDebug('未识别到页面信息'); setLookingUp(false); return; }
 
       // 1. 先查缓存
-      const record = await findMatch(company, title, boss);
+      const record = await findMatch(company, title);
       if (record) {
         setResult({ greeting: record.greeting, score: record.score, scoreReason: record.scoreReason || `${record.company || record.bossName} · ${record.jobTitle}` });
         setStatus('ready'); setCollapsed(false); setPageMode('history');
@@ -114,7 +114,7 @@ export default function App() {
 
       // 如果 LLM 提取不到 JD，查缓存的 JD
       if (!r.jdText || r.jdText.trim().length < 20) {
-        const cachedRecord = await findMatch(r.company, r.jobTitle, r.bossName);
+        const cachedRecord = await findMatch(r.company, r.jobTitle);
         if (cachedRecord?.jdText) {
           setDebug('⏳ 用缓存JD重新生成...');
           const genRes = (await chrome.runtime.sendMessage({
@@ -197,7 +197,7 @@ export default function App() {
       // 第二步：如果 LLM 没提取到 JD，从本地缓存补
       if (!r.jdText || r.jdText.trim().length < 20) {
         setDebug('⏳ 页面无JD，从本地缓存查找...');
-        const record = await findMatch(r.company, r.jobTitle, r.bossName);
+        const record = await findMatch(r.company, r.jobTitle);
         if (record?.jdText) {
           setDebug('⏳ 找到缓存JD，重新生成...');
           const cachedResult = await generateWithJD(record.jdText, focus, r.company, r.jobTitle, r.bossName);
