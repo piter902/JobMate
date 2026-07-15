@@ -73,7 +73,7 @@ export default function App() {
   }, []);
 
   const lookupCache = useCallback(async () => {
-    setLookingUp(true); setDebug('');
+    setLookingUp(true); setDebug('🔍 查找缓存...');
     try {
       const { extractCompany, extractJobTitle, extractBossName } = await import('@/lib/jd-extractor');
       const company = extractCompany();
@@ -83,16 +83,77 @@ export default function App() {
 
       if (!company && !title && !boss) { setDebug('未识别到页面信息'); setLookingUp(false); return; }
 
+      // 1. 先查缓存
       const record = await findMatch(company, title, boss);
       if (record) {
         setResult({ greeting: record.greeting, score: record.score, scoreReason: record.scoreReason || `${record.company || record.bossName} · ${record.jobTitle}` });
         setStatus('ready'); setCollapsed(false); setPageMode('history');
         await copyText(record.greeting); setCopied(true);
         beginPoll(record.greeting);
-        setDebug(`✅ ${record.company || record.bossName} · ${record.jobTitle}`);
-      } else {
-        setDebug(`无缓存 (${[company, title, boss].filter(Boolean).join(' · ') || '无'})`);
+        setDebug(`✅ 缓存匹配 · ${record.company || record.bossName} · ${record.jobTitle}`);
+        setLookingUp(false);
+        return;
       }
+
+      // 2. 无缓存 → 尝试生成
+      setDebug('⏳ 无缓存，尝试LLM分析页面...');
+      const pageText = getPageText();
+      if (!pageText.trim()) { setDebug('❌ 页面无内容，请到职位详情页生成'); setLookingUp(false); return; }
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'EXTRACT_AND_GENERATE', pageText, focus: 'none' as FocusOption,
+      }) as {
+        type: string;
+        result?: { company: string; jobTitle: string; bossName: string; jdText: string; greeting: string; score: number; scoreReason: string };
+        error?: string;
+      };
+
+      if (response.error) { setDebug('❌ ' + response.error); setLookingUp(false); return; }
+
+      const r = response.result!;
+
+      // 如果 LLM 提取不到 JD，查缓存的 JD
+      if (!r.jdText || r.jdText.trim().length < 20) {
+        const cachedRecord = await findMatch(r.company, r.jobTitle, r.bossName);
+        if (cachedRecord?.jdText) {
+          setDebug('⏳ 用缓存JD重新生成...');
+          const genRes = (await chrome.runtime.sendMessage({
+            type: 'GENERATE_GREETING', jdText: cachedRecord.jdText, focus: 'none' as FocusOption,
+          })) as GenerateGreetingResponse;
+          if (genRes.result) {
+            r.greeting = genRes.result.greeting;
+            r.score = genRes.result.score;
+            r.scoreReason = genRes.result.scoreReason;
+            r.jdText = cachedRecord.jdText;
+          }
+        }
+
+        if (!r.greeting) {
+          setDebug('❌ 无JD信息，请先到职位详情页生成一次');
+          setLookingUp(false);
+          return;
+        }
+      }
+
+      setCurrentCompany(r.company); setCurrentTitle(r.jobTitle); setCurrentBoss(r.bossName);
+      setResult({ greeting: r.greeting, score: r.score, scoreReason: r.scoreReason });
+      setDebug(`✅ 生成完成 · ${r.company || r.bossName} · ${r.jobTitle}`);
+      setStatus('ready'); setCollapsed(false); setPageMode('history');
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ greeting: r.greeting, score: r.score, scoreReason: r.scoreReason })); } catch {}
+
+      try {
+        if (r.company || r.jobTitle) {
+          await saveGreeting({
+            company: r.company, jobTitle: r.jobTitle, bossName: r.bossName,
+            jdText: r.jdText, greeting: r.greeting, score: r.score,
+            scoreReason: r.scoreReason, time: Date.now(),
+          });
+        }
+      } catch {}
+
+      track('greeting_button_clicked', { focus: 'none' });
+      await copyText(r.greeting); setCopied(true);
+      beginPoll(r.greeting);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       setDebug(msg.includes('Extension context invalidated') ? '⚠ 请刷新Boss页面' : '❌ ' + (msg || '查找失败'));
