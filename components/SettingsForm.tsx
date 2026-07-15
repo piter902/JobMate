@@ -61,7 +61,7 @@ export function SettingsForm() {
   }, [load]);
 
   return (
-    <div style={{ width: 380, padding: 24, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151' }}>
+    <div style={{ width: '100%', padding: 20, boxSizing: 'border-box', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151' }}>
       <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>🤖 JobMate</h1>
 
       <section style={{ marginBottom: 24 }}>
