@@ -58,7 +58,7 @@ export function SettingsForm() {
 
   return (
     <div style={{ width: 360, padding: 20, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151' }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>🤖 智能招呼语助手</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>🤖 JobMate</h1>
 
       <section style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>DeepSeek API Key</h2>

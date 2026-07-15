@@ -11,8 +11,8 @@ export default defineConfig({
     },
   }),
   manifest: {
-    name: '智能招呼语助手',
-    description: '在Boss直聘上根据JD和简历自动生成个性化招呼语',
+    name: 'JobMate',
+    description: 'AI 求职助手 — 智能招呼语、JD-简历匹配度分析、面试评估',
     version: '0.1.0',
     permissions: ['storage', 'clipboardWrite'],
     host_permissions: ['*://*.zhipin.com/*', '*://*.posthog.com/*'],
@@ -32,7 +32,7 @@ export default defineConfig({
     },
 
     action: {
-      default_title: '智能招呼语助手',
+      default_title: 'JobMate',
       default_popup: 'popup.html',
       default_icon: {
         16: 'icons/icon-16.png',

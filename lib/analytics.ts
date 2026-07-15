@@ -29,7 +29,7 @@ export async function track(event: string, props?: Record<string, unknown>): Pro
         api_key: PH_KEY,
         event,
         distinct_id: await getDistinctId(),
-        properties: { ...props, $lib: 'greeting-agent' },
+        properties: { ...props, $lib: 'JobMate' },
       }),
     });
     entry.status = res.status;

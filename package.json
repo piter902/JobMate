@@ -1,7 +1,7 @@
 {
   "name": "recruitment-greeting-plugin",
   "version": "0.1.0",
-  "description": "在Boss直聘上根据JD和简历自动生成个性化招呼语",
+  "description": "AI-powered job application assistant - greetings, resume evaluation, referrals",
   "private": true,
   "scripts": {
     "dev": "wxt",

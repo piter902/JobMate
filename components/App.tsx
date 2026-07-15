@@ -229,7 +229,7 @@ export default function App() {
   return (
     <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: '#9ca3af' }}>招呼语助手{pageMode === 'history' ? ' · 历史' : ''}</span>
+        <span style={{ fontSize: 12, color: '#9ca3af' }}>JobMate{pageMode === 'history' ? ' · 历史' : ''}</span>
         <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 4, color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px' }}>收起</button>
       </div>
 
