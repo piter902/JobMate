@@ -131,7 +131,7 @@ export function buildExtractAndGeneratePrompt(pageText: string, focus: FocusOpti
 ${resumeText || '（未提供简历）'}
 
 【Boss直聘页面文本】
-${pageText.slice(0, 4000)}
+${pageText}
 
 侧重点：${focusMap[focus]}
 

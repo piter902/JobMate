@@ -9,7 +9,8 @@
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
-    "zip:firefox": "wxt zip -b firefox"
+    "zip:firefox": "wxt zip -b firefox",
+    "test:local": "node tests/local/run.cjs"
   },
   "dependencies": {
     "mammoth": "^1.8.0",

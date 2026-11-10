@@ -3,45 +3,31 @@
 const JD_KEYWORDS = ['任职要求', '岗位职责', '职位描述', '工作内容', '能力要求', '任职资格', '岗位要求', '职位要求'];
 const MIN_JD = 50;
 
-// ---- JD ----
+export function extractCurrentJD(): { text: string; status: 'valid' | 'incomplete' | 'missing' | 'ambiguous'; reason: string } {
+  const excluded = 'nav, aside, [hidden], [aria-hidden="true"], [class*="recommend"], [class*="related"], [class*="sidebar"], [class*="message-list"], [class*="chat-message"]';
+  const nodes = Array.from(document.querySelectorAll('.job-sec-text, .job-detail, [class*="job-detail"], [class*="detail-content"]'))
+    .filter(el => !el.closest(excluded) && el.getClientRects().length > 0 && window.getComputedStyle(el).visibility !== 'hidden');
+  const leaves = nodes.filter(el => !nodes.some(other => other !== el && el.contains(other)));
+  const texts = leaves.map(el => {
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(excluded + ', script, style, button').forEach(node => node.remove());
+    clone.querySelectorAll('br').forEach(node => node.replaceWith('\n'));
+    clone.querySelectorAll('p, div, li').forEach(node => node.append('\n'));
+    return clean(clone.textContent || '');
+  }).filter(Boolean);
+  const unique = [...new Set(texts)];
+  if (!unique.length) return { text: '', status: 'missing', reason: '未找到当前岗位JD，请打开职位详情' };
+  if (unique.length > 1) return { text: '', status: 'ambiguous', reason: '检测到多个职位详情，请只打开目标岗位' };
+  const text = unique[0];
+  const incomplete = text.length < MIN_JD || !/任职要求|岗位要求|职位要求|任职资格|能力要求|要求[:：]/.test(text) ||
+    leaves.some(el => /展开全部|展开更多|查看完整/.test((el.closest('.job-detail')?.parentElement || el.parentElement)?.innerText || '') ||
+      (['hidden', 'clip'].includes(window.getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 2));
+  return { text, status: incomplete ? 'incomplete' : 'valid', reason: incomplete ? 'JD可能不完整，请展开完整职位要求后重试' : '' };
+}
+
 export function extractJD(): string | null {
-  // 1. .job-sec-text 的父级容器（详情页）
-  const secText = document.querySelector('.job-sec-text');
-  if (secText) {
-    const container = secText.closest('.job-sec, .job-detail, [class*="detail"]') || secText.parentElement;
-    if (container) {
-      const text = clean(container.textContent || '');
-      if (text.length >= MIN_JD && containsJD(text)) return text;
-    }
-  }
-
-  // 2. 通用 detail 选择器
-  for (const el of document.querySelectorAll('.job-detail, [class*="job-detail"], [class*="detail-content"]')) {
-    if (isExcluded(el)) continue;
-    const text = clean(el.textContent || '');
-    if (text.length >= MIN_JD && containsJD(text)) return text;
-  }
-
-  // 3. 从"立即沟通"按钮定位
-  const btn = findChatButton();
-  if (btn) {
-    const section = walkUp(btn);
-    if (section) { const t = clean(section.textContent || ''); if (t.length >= MIN_JD) return t; }
-  }
-
-  // 4. 全局扫描
-  const scope = document.querySelector('main, [role="main"], .main, .container') || document.body;
-  const candidates: Array<{ len: number; text: string }> = [];
-  for (const el of scope.querySelectorAll('div, section, article')) {
-    if (isExcluded(el) || el.children.length > 10) continue;
-    const text = clean(el.textContent || '');
-    if (text.length > 100 && containsJD(text)) candidates.push({ len: text.length, text });
-  }
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => a.len - b.len);
-    return candidates[Math.floor(candidates.length / 2)].text;
-  }
-  return null;
+  const result = extractCurrentJD();
+  return result.status === 'valid' ? result.text : null;
 }
 
 // ---- 公司名 ----

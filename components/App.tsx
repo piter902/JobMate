@@ -1,3 +1,4 @@
+import { extractCurrentJD } from '@/lib/jd-extractor';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
@@ -20,8 +21,9 @@ function scoreColor(s: number): string {
 }
 
 function getPageText(): string {
-  const main = document.querySelector('main, [role="main"], .main, .container');
-  return ((main || document.body).innerText || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
+  const result = extractCurrentJD();
+  if (result.status !== 'valid') throw new Error(result.reason);
+  return result.text;
 }
 
 export default function App() {
