@@ -2,7 +2,7 @@ import { extractCurrentJD } from '@/lib/jd-extractor';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GreetingButton } from './GreetingButton';
 import { Toast, useToast } from './Toast';
-import type { FocusOption, GreetingResult, GenerateGreetingResponse } from '@/lib/types';
+import type { FocusOption, GreetingResult, ResumeGreetingResponse } from '@/lib/types';
 import { track } from '@/lib/analytics';
 import { saveGreeting, findMatch } from '@/lib/history';
 
@@ -20,11 +20,6 @@ function scoreColor(s: number): string {
   return '#dc2626';
 }
 
-function getPageText(): string {
-  const result = extractCurrentJD();
-  if (result.status !== 'valid') throw new Error(result.reason);
-  return result.text;
-}
 
 export default function App() {
   const [status, setStatus] = useState<Status>('idle');
@@ -65,18 +60,21 @@ export default function App() {
     tick(); pollTimerRef.current = setInterval(tick, POLL_INTERVAL);
   }, [stopPoll, showToast]);
 
-  // 用已知 JD 生成招呼语（不重新提取页面）
-  const generateWithJD = useCallback(async (jdText: string, focus: FocusOption, company: string, title: string, boss: string) => {
-    const response = (await chrome.runtime.sendMessage({
-      type: 'GENERATE_GREETING', jdText, focus,
-    })) as GenerateGreetingResponse;
-    if (response.error) throw new Error(response.error);
-    return response.result!;
-  }, []);
+  const generateWithoutJD = useCallback(async () => {
+    setResult(null); stopPoll();
+    sessionStorage.removeItem(CACHE_KEY);
+    const response = await chrome.runtime.sendMessage({ type: 'GENERATE_RESUME_GREETING' }) as ResumeGreetingResponse;
+    if (response.error || !response.result) throw new Error(response.error || '生成失败');
+    setResult(response.result); setStatus('ready'); setPageMode('generate');
+    setDebug('当前页面无JD，已根据当前简历技能生成标准招呼语');
+  }, [stopPoll]);
 
   const lookupCache = useCallback(async () => {
     setLookingUp(true); setDebug('🔍 查找缓存...');
     try {
+      const jd = extractCurrentJD();
+      if (jd.status === 'missing') { await generateWithoutJD(); return; }
+      if (jd.status !== 'valid') throw new Error(jd.reason);
       const { extractCompany, extractJobTitle } = await import('@/lib/jd-extractor');
       const company = extractCompany();
       const title = extractJobTitle();
@@ -96,45 +94,19 @@ export default function App() {
         return;
       }
 
-      // 2. 无缓存招呼语 → 查该公司的历史 JD，用 JD 重新生成
-      setDebug('⏳ 无缓存，查找历史JD...');
-      const allRecords = await import('@/lib/history').then(m => m.loadAll());
-      const jdRecord = allRecords.find(r =>
-        r.company.trim() === company.trim() && r.jdText.trim().length > 20,
-      );
-      if (jdRecord) {
-        setDebug('⏳ 找到历史JD，生成中...');
-        const genRes = (await chrome.runtime.sendMessage({
-          type: 'GENERATE_GREETING', jdText: jdRecord.jdText, focus: 'none' as FocusOption,
-        })) as GenerateGreetingResponse;
-        if (genRes.error) { setDebug('❌ ' + genRes.error); setLookingUp(false); return; }
-
-        const r = genRes.result!;
-        setResult(r); setStatus('ready'); setCollapsed(false); setPageMode('history');
-        try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(r)); } catch {}
-        await saveGreeting({
-          company, jobTitle: title, bossName: jdRecord.bossName,
-          jdText: jdRecord.jdText, greeting: r.greeting, score: r.score,
-          scoreReason: r.scoreReason, time: Date.now(),
-        });
-        await copyText(r.greeting); setCopied(true);
-        beginPoll(r.greeting);
-        setDebug(`✅ 已生成 · ${company} · ${title}`);
-      } else {
-        setDebug('❌ 无缓存JD，请先到职位详情页生成一次');
-      }
+      setDebug('未找到该岗位的历史招呼语，请使用生成按钮；不会复用历史JD');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       setDebug(msg.includes('Extension context invalidated') ? '⚠ 请刷新Boss页面' : '❌ ' + (msg || '查找失败'));
     } finally { setLookingUp(false); }
-  }, [beginPoll]);
+  }, [beginPoll, generateWithoutJD]);
 
   useEffect(() => {
     (async () => {
       try {
         chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
         const cached = sessionStorage.getItem(CACHE_KEY);
-        if (cached) { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); setPageMode('generate'); beginPoll(JSON.parse(cached).greeting); return; }
+        if (cached && extractCurrentJD().status === 'valid') { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); setPageMode('generate'); beginPoll(JSON.parse(cached).greeting); return; }
       } catch {}
     })();
 
@@ -159,7 +131,10 @@ export default function App() {
     setAutoFilled(false); autoFilledRef.current = false; stopPoll();
 
     try {
-      const pageText = getPageText();
+      const jd = extractCurrentJD();
+      if (jd.status === 'missing') { await generateWithoutJD(); return; }
+      if (jd.status !== 'valid') throw new Error(jd.reason);
+      const pageText = jd.text;
       if (!pageText.trim()) { setDebug('❌ 页面无内容'); setStatus('error'); return; }
 
       // 第一步：LLM 提取 + 生成
@@ -173,27 +148,15 @@ export default function App() {
 
       if (response.error) { setDebug('❌ ' + response.error); setStatus('error'); return; }
 
-      let r = response.result!;
-      let fromCache = false;
-
-      // 第二步：如果 LLM 没提取到 JD，从本地缓存补
-      if (!r.jdText || r.jdText.trim().length < 20) {
-        setDebug('⏳ 页面无JD，从本地缓存查找...');
-        const record = await findMatch(r.company, r.jobTitle);
-        if (record?.jdText) {
-          setDebug('⏳ 找到缓存JD，重新生成...');
-          const cachedResult = await generateWithJD(record.jdText, focus, r.company, r.jobTitle, r.bossName);
-          r = { ...r, greeting: cachedResult.greeting, score: cachedResult.score, scoreReason: cachedResult.scoreReason, jdText: record.jdText };
-          fromCache = true;
-        }
-      }
+      const r = response.result!;
+      if (!r.jdText || r.jdText.trim().length < 20) { await generateWithoutJD(); return; }
 
       // 如果仍然没有 JD 和招呼语
       if (!r.greeting) { setDebug('❌ 无法获取JD，请在有JD的页面先生成一次'); setStatus('error'); return; }
 
       setCurrentCompany(r.company); setCurrentTitle(r.jobTitle); setCurrentBoss(r.bossName);
       setResult({ greeting: r.greeting, score: r.score, scoreReason: r.scoreReason });
-      setDebug(`✅ ${r.company || r.bossName} · ${r.jobTitle}${fromCache ? ' (缓存JD)' : ''}`);
+      setDebug(`✅ ${r.company || r.bossName} · ${r.jobTitle}`);
       setStatus('ready');
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ greeting: r.greeting, score: r.score, scoreReason: r.scoreReason })); } catch {}
 
@@ -215,7 +178,7 @@ export default function App() {
       setDebug(msg.includes('Extension context invalidated') ? '⚠ 请刷新Boss页面' : '❌ ' + (msg || '网络错误'));
       setStatus('error');
     }
-  }, [stopPoll, beginPoll, generateWithJD]);
+  }, [stopPoll, beginPoll, generateWithoutJD]);
 
   const handleCopy = useCallback(async () => {
     if (!result) return;
@@ -251,12 +214,12 @@ export default function App() {
 
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: valid ? (s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2') : '#f9fafb' }}>
+          {valid && <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: valid ? (s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2') : '#f9fafb' }}>
             <span style={{ fontSize: 12, color: '#6b7280' }}>匹配度</span>
             <span style={{ fontSize: 24, fontWeight: 700, color: scoreColor(s), lineHeight: 1 }}>{valid ? s : '—'}</span>
             {valid && <span style={{ fontSize: 12, color: '#9ca3af' }}>/100</span>}
             {valid && <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}><div style={{ width: `${s}%`, height: '100%', borderRadius: 3, background: scoreColor(s), transition: 'width 0.5s' }} /></div>}
-          </div>
+          </div>}
           {result.scoreReason && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, lineHeight: 1.5, padding: '6px 8px', borderRadius: 4, background: '#f9fafb' }}>💡 {result.scoreReason}</div>}
           <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>{result.greeting}</div>
             <button onClick={handleCopy} style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: copied ? '#16a34a' : '#22c55e', color: '#fff' }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>

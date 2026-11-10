@@ -15,7 +15,7 @@ export interface GenerateGreetingRequest {
 
 export interface GreetingResult {
   greeting: string;
-  score: number;
+  score: number | null;
   scoreReason: string;
 }
 
@@ -45,3 +45,10 @@ export const STORAGE_KEYS = {
 export const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 export const DEEPSEEK_MODEL = 'deepseek-chat';
 export const GENERATE_TIMEOUT_MS = 30_000;
+
+export interface ResumeGreetingRequest { type: 'GENERATE_RESUME_GREETING' }
+export interface ResumeGreetingResponse {
+  type: 'GENERATE_RESUME_GREETING_RESULT';
+  result?: GreetingResult;
+  error?: string;
+}

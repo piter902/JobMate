@@ -10,7 +10,7 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
-    "test:local": "node tests/local/run.cjs"
+    "test:local": "node tests/local/run.cjs && node tests/local/f02.cjs"
   },
   "dependencies": {
     "mammoth": "^1.8.0",
@@ -21,6 +21,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/chrome": "^0.3.7",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@wxt-dev/module-react": "^1.1.0",
