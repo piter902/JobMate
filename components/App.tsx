@@ -25,6 +25,7 @@ export default function App() {
   const [status, setStatus] = useState<Status>('idle');
   const [needsSetup, setNeedsSetup] = useState(true);
   const [debug, setDebug] = useState('');
+  const [jdNotice, setJdNotice] = useState('');
   const [result, setResult] = useState<GreetingResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -61,6 +62,8 @@ export default function App() {
   }, [stopPoll, showToast]);
 
   const generateWithoutJD = useCallback(async () => {
+    setJdNotice('当前页面未找到岗位 JD，将根据当前简历中的技能生成标准招呼语，不进行岗位匹配评分。你也可以打开职位详情页后重新生成。');
+    setCollapsed(false); setStatus('loading'); setCopied(false);
     setResult(null); stopPoll();
     sessionStorage.removeItem(CACHE_KEY);
     const response = await chrome.runtime.sendMessage({ type: 'GENERATE_RESUME_GREETING' }) as ResumeGreetingResponse;
@@ -72,6 +75,7 @@ export default function App() {
   const lookupCache = useCallback(async () => {
     setLookingUp(true); setDebug('🔍 查找缓存...');
     try {
+      setJdNotice('');
       const jd = extractCurrentJD();
       if (jd.status === 'missing') { await generateWithoutJD(); return; }
       if (jd.status !== 'valid') throw new Error(jd.reason);
@@ -97,6 +101,7 @@ export default function App() {
       setDebug('未找到该岗位的历史招呼语，请使用生成按钮；不会复用历史JD');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
+      setStatus('error');
       setDebug(msg.includes('Extension context invalidated') ? '⚠ 请刷新Boss页面' : '❌ ' + (msg || '查找失败'));
     } finally { setLookingUp(false); }
   }, [beginPoll, generateWithoutJD]);
@@ -114,7 +119,7 @@ export default function App() {
     const onStorageChange = (changes: Record<string, chrome.storage.StorageChange>) => {
       if (changes['selectedResumeId']) {
         sessionStorage.removeItem(CACHE_KEY);
-        setResult(null); setStatus('idle'); setDebug('');
+        setResult(null); setStatus('idle'); setDebug(''); setJdNotice('');
       }
     };
     chrome.storage.onChanged.addListener(onStorageChange);
@@ -131,6 +136,7 @@ export default function App() {
     setAutoFilled(false); autoFilledRef.current = false; stopPoll();
 
     try {
+      setJdNotice('');
       const jd = extractCurrentJD();
       if (jd.status === 'missing') { await generateWithoutJD(); return; }
       if (jd.status !== 'valid') throw new Error(jd.reason);
@@ -210,15 +216,19 @@ export default function App() {
         }}>{lookingUp ? '查找中...' : '查历史招呼语 →'}</button>
       </div>
 
+      {jdNotice && <div role="status" data-testid="jd-missing-notice" style={{ marginTop: 8, maxWidth: 340, padding: 8, background: '#fffbeb', color: '#92400e', fontSize: 12, lineHeight: 1.6 }}>{jdNotice}</div>}
+
       {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#2563eb' }}>{debug}</div>}
 
       {result && status === 'ready' && (
         <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
+          {jdNotice && <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>未获取 JD · 基于简历技能生成</div>}
           {valid && <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: valid ? (s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2') : '#f9fafb' }}>
             <span style={{ fontSize: 12, color: '#6b7280' }}>匹配度</span>
             <span style={{ fontSize: 24, fontWeight: 700, color: scoreColor(s), lineHeight: 1 }}>{valid ? s : '—'}</span>
             {valid && <span style={{ fontSize: 12, color: '#9ca3af' }}>/100</span>}
-            {valid && <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}><div style={{ width: `${s}%`, height: '100%', borderRadius: 3, background: scoreColor(s), transition: 'width 0.5s' }} /></div>}
+            {jdNotice && <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>未获取 JD · 基于简历技能生成</div>}
+          {valid && <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}><div style={{ width: `${s}%`, height: '100%', borderRadius: 3, background: scoreColor(s), transition: 'width 0.5s' }} /></div>}
           </div>}
           {result.scoreReason && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, lineHeight: 1.5, padding: '6px 8px', borderRadius: 4, background: '#f9fafb' }}>💡 {result.scoreReason}</div>}
           <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>{result.greeting}</div>

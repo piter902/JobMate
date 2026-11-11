@@ -10,9 +10,11 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
-    "test:local": "node tests/local/run.cjs && node tests/local/f02.cjs"
+    "test:local": "node tests/local/run.cjs && node tests/local/f02.cjs && node tests/local/f03.cjs && node tests/local/f04-rules.cjs && node tests/local/f04.cjs",
+    "test:resume-e2e": "node tests/local/resume-e2e.cjs"
   },
   "dependencies": {
+    "jszip": "^3.10.2",
     "mammoth": "^1.8.0",
     "pdfjs-dist": "^4.9.155",
     "playwright": "^1.61.1",

@@ -1,41 +1,47 @@
-export interface ParseResult {
-  text: string;
-  fileName: string;
+import type { ResumeTrace } from './resume-headings';
+import { normalizeSections, orderPDFWords, validateResumeText } from './resume-layout';
+export interface ParseResult { text: string; fileName: string; warnings: string[] }
+function result(raw: string, fileName: string, extra: string[] = []): ParseResult {
+ const text=normalizeSections(raw);
+ return {text,fileName,warnings:[...extra,...validateResumeText(text)]};
 }
-
-export async function parsePDF(file: File): Promise<ParseResult> {
-  const pdfjsLib = await import('pdfjs-dist');
-  const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = (workerModule as { default: string }).default;
-
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
-  const pages: string[] = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item: { str?: string }) => ('str' in item ? item.str : ''))
-      .join(' ');
-    pages.push(pageText);
+export async function parsePDF(file: File, trace?: ResumeTrace[]): Promise<ParseResult> {
+ const pdfjsLib=await import('pdfjs-dist');
+ const worker=await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+ pdfjsLib.GlobalWorkerOptions.workerSrc=worker.default;
+ const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+ const pages:string[]=[];
+ const warnings:string[]=[];
+ try {
+  for(let i=1;i<=pdf.numPages;i++){
+   const page=await pdf.getPage(i),content=await page.getTextContent();
+   const words=content.items.filter(item=>'str' in item).map(item=>{
+    if(!('str' in item))throw new Error('Invalid text item');
+    return {str:item.str,x:item.transform[4],y:item.transform[5],width:item.width,height:Math.abs(item.height)||10,bold:/bold|黑体/i.test((content.styles[item.fontName]?.fontFamily || '')+' '+item.fontName)?true:undefined};
+   });
+   pages.push(orderPDFWords(words,page.getViewport({scale:1}).width,warnings,i,trace));
   }
-
-  return { text: pages.join('\n\n').trim(), fileName: file.name };
+ } finally {await pdf.destroy();}
+ return result(pages.join('\n\n'),file.name,[...warnings,'PDF按独立行与字数识别章节；复杂版式和短公司名请核对']);
 }
-
-export async function parseDocx(file: File): Promise<ParseResult> {
-  const mammoth = await import('mammoth');
-  const arrayBuffer = await file.arrayBuffer();
-  const result = await mammoth.extractRawText({ arrayBuffer });
-  return { text: result.value.trim(), fileName: file.name };
+export async function parseDocx(file: File, trace?: ResumeTrace[]): Promise<ParseResult> {
+ const {readDocx}=await import('./resume-docx');
+ const warnings:string[]=[];
+ const text=await readDocx(await file.arrayBuffer(),warnings,trace);
+ return result(text,file.name,warnings);
 }
-
 export async function parseResume(file: File): Promise<ParseResult> {
-  const ext = file.name.split('.').pop()?.toLowerCase();
-  switch (ext) {
-    case 'pdf': return parsePDF(file);
-    case 'docx': return parseDocx(file);
-    default: throw new Error(`不支持的文件格式: .${ext}，请上传 PDF 或 DOCX 文件`);
-  }
+ const ext=file.name.split('.').pop()?.toLowerCase();
+ if(ext==='pdf')return parsePDF(file);
+ if(ext==='docx')return parseDocx(file);
+ throw new Error('请上传 PDF 或 DOCX 文件');
+}
+
+// Diagnostics are opt-in; normal parsing and stored text retain their existing shape.
+export async function diagnoseResume(file:File) {
+ const trace:ResumeTrace[]=[];
+ const ext=file.name.split('.').pop()?.toLowerCase();
+ if(ext!=='pdf'&&ext!=='docx')throw new Error('诊断仅支持PDF/DOCX，旧DOC需先转换');
+ const result=ext==='pdf'?await parsePDF(file,trace):await parseDocx(file,trace);
+ return {result,trace};
 }

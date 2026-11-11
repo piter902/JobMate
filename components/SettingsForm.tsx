@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { storage } from '@/lib/storage';
 import type { ResumeItem } from '@/lib/storage';
+import { normalizeSections, validateResumeText } from '@/lib/resume-layout';
 import { parseResume } from '@/lib/resume-parser';
 
 const FEISHU_URL = 'https://scnanhq8rwck.feishu.cn/wiki/DkScwkZiKigkgBkprZncGHpFnpe';
@@ -10,6 +11,7 @@ export function SettingsForm() {
   const [maskedKey, setMaskedKey] = useState('');
   const [resumes, setResumes] = useState<ResumeItem[]>([]);
   const [selectedId, setSelectedId] = useState('');
+  const [draft, setDraft] = useState<{ text: string; fileName: string; warnings: string[] } | null>(null);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -41,16 +43,27 @@ export function SettingsForm() {
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
-    setParsing(true); setMessage(null);
+    setParsing(true); setMessage(null); setDraft(null);
     try {
       const result = await parseResume(file);
-      await storage.addResume(result.text, result.fileName);
-      await load();
-      setMessage({ text: `"${result.fileName}" 上传成功`, type: 'success' });
+      setDraft(result);
     } catch (err) {
       setMessage({ text: (err as Error).message || '解析失败', type: 'error' });
-    } finally { setParsing(false); }
+    } finally { setParsing(false); e.target.value = ''; }
   }, [load]);
+
+  const handleConfirmResume = async () => {
+    if (!draft) return;
+    const text = normalizeSections(draft.text);
+    if (!text.trim()) { setMessage({ text: '简历文本为空，请补充后保存', type: 'error' }); return; }
+    setSaving(true);
+    try {
+      await storage.addResume(text, draft.fileName);
+      setDraft(null); await load();
+      setMessage({ text: '简历已确认并保存', type: 'success' });
+    } catch { setMessage({ text: '保存失败，请重试', type: 'error' }); }
+    finally { setSaving(false); }
+  };
 
   const handleSelect = useCallback(async (id: string) => {
     await storage.selectResume(id); setSelectedId(id);
@@ -103,6 +116,15 @@ export function SettingsForm() {
           <input type="file" accept=".pdf,.docx" onChange={handleFileUpload} disabled={parsing} style={{ display: 'none' }} />
         </label>
       </section>
+
+      {draft && <section aria-label="简历解析预览" style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 14 }}>确认简历章节和内容归属</h2>
+        <p>请对照原件检查章节顺序，可直接修改文本。确认后才会保存并用于生成。</p>
+        {[...new Set([...draft.warnings, ...validateResumeText(draft.text)])].map(w => <p key={w} role="status" style={{ color: '#92400e' }}>{w}</p>)}
+        <textarea aria-label="简历文本预览" value={draft.text} onChange={e => setDraft({ ...draft, text: e.target.value })} style={{ width: '100%', minHeight: 260, boxSizing: 'border-box' }} />
+        <button onClick={handleConfirmResume} disabled={saving || !draft.text.trim()}>确认并保存简历</button>
+        <button onClick={() => setDraft(null)} disabled={saving}>取消</button>
+      </section>}
 
       <section style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>联系作者</h2>
