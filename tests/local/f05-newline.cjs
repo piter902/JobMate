@@ -1,0 +1,12 @@
+const fs=require('fs'),ts=require('typescript'),assert=require('node:assert/strict');
+const m={};new Function('exports',ts.transpileModule(fs.readFileSync('lib/greeting-format.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(m);
+const old=JSON.parse(fs.readFileSync('tests/local/private/f05-live/2026-11-12T10-37-15-569Z.json','utf8')).rawGreeting;
+const fixed=m.normalizeGreeting(old);
+assert.equal(fixed.split('\n').length,4);assert.equal(m.inspectGreeting(fixed).errors.length,0);
+assert.ok(m.inspectGreeting(old,false,false).errors.length);assert.equal(m.normalizeGreeting(fixed),fixed);
+assert.equal(fixed.replace(/\s/g,''),old.replace(/\s/g,''));
+const numeric='介绍。\n1. 使用Python3.11处理1.5万数据和10+项目。\n2. 用SQL查询。';
+assert.equal(m.normalizeGreeting(numeric),numeric);
+assert.equal(m.normalizeGreeting('介绍。1. React。3. SQL。'),'介绍。1. React。3. SQL。');
+console.log('PASS 历史真实响应换行修复、原始与展示分开校验、文字不变、幂等、数字保护、跳号不重写');
+console.log(fixed);

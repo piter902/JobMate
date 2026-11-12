@@ -1,3 +1,4 @@
+import { inspectGreeting } from '@/lib/greeting-format';
 import { extractCurrentJD } from '@/lib/jd-extractor';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GreetingButton } from './GreetingButton';
@@ -196,6 +197,7 @@ export default function App() {
     return <button onClick={() => setCollapsed(false)} style={{ width: 40, height: 40, borderRadius: '50%', background: '#5ebb8a', color: '#fff', border: 'none', fontSize: 18, cursor: 'pointer', boxShadow: '0 2px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>💼</button>;
   }
 
+  const formatCheck = result ? inspectGreeting(result.greeting, result.score === null) : null;
   const s = result?.score ?? -1;
   const valid = s >= 0;
 
@@ -230,6 +232,7 @@ export default function App() {
             {jdNotice && <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>未获取 JD · 基于简历技能生成</div>}
           {valid && <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}><div style={{ width: `${s}%`, height: '100%', borderRadius: 3, background: scoreColor(s), transition: 'width 0.5s' }} /></div>}
           </div>}
+          {formatCheck && [...formatCheck.errors, ...formatCheck.warnings].map(note => <div key={note} role="status" style={{ fontSize: 12, color: '#92400e', marginBottom: 6 }}>{note}</div>)}
           {result.scoreReason && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, lineHeight: 1.5, padding: '6px 8px', borderRadius: 4, background: '#f9fafb' }}>💡 {result.scoreReason}</div>}
           <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>{result.greeting}</div>
             <button onClick={handleCopy} style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: copied ? '#16a34a' : '#22c55e', color: '#fff' }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>

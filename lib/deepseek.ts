@@ -1,3 +1,4 @@
+import { normalizeGreeting } from './greeting-format';
 import { DEEPSEEK_API_URL, DEEPSEEK_MODEL, GENERATE_TIMEOUT_MS } from './types';
 import { buildSystemPrompt, buildUserPrompt } from './prompt';
 import type { FocusOption, GreetingResult } from './types';
@@ -64,13 +65,13 @@ function parseResult(raw: string): GreetingResult {
     try {
       const p = JSON.parse(jsonMatch[0]);
       return {
-        greeting: String(p.greeting || ''),
+        greeting: normalizeGreeting(String(p.greeting || '')),
         score: Math.round(Math.min(100, Math.max(0, Number(p.score) || 50))),
         scoreReason: String(p.scoreReason || ''),
       };
     } catch {}
   }
-  return { greeting: raw, score: 50, scoreReason: '' };
+  return { greeting: normalizeGreeting(raw), score: 50, scoreReason: '' };
 }
 
 export async function validateApiKey(apiKey: string): Promise<boolean> {
@@ -163,7 +164,7 @@ export async function extractAndGenerate(
         bossName: String(p.bossName || ''),
         jdText: String(p.jdText || ''),
         dimensions: dims,
-        greeting: String(p.greeting || ''),
+        greeting: normalizeGreeting(String(p.greeting || '')),
         score: Math.round(Math.min(100, Math.max(0, Number(p.score) || Math.round((mc / tc) * 100)))),
         matchedCount: mc,
         totalCount: tc,
