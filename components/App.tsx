@@ -1,4 +1,4 @@
-import { inspectGreeting } from '@/lib/greeting-format';
+import { inspectGreeting, normalizeGreeting } from '@/lib/greeting-format';
 import { extractCurrentJD } from '@/lib/jd-extractor';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GreetingButton } from './GreetingButton';
@@ -69,6 +69,7 @@ export default function App() {
     sessionStorage.removeItem(CACHE_KEY);
     const response = await chrome.runtime.sendMessage({ type: 'GENERATE_RESUME_GREETING' }) as ResumeGreetingResponse;
     if (response.error || !response.result) throw new Error(response.error || '生成失败');
+    response.result.greeting = normalizeGreeting(response.result.greeting);
     setResult(response.result); setStatus('ready'); setPageMode('generate');
     setDebug('当前页面无JD，已根据当前简历技能生成标准招呼语');
   }, [stopPoll]);
@@ -90,6 +91,7 @@ export default function App() {
       // 1. 查缓存 → 有就直出
       const record = await findMatch(company, title);
       if (record) {
+        record.greeting = normalizeGreeting(record.greeting);
         setResult({ greeting: record.greeting, score: record.score, scoreReason: record.scoreReason || `${record.company} · ${record.jobTitle}` });
         setStatus('ready'); setCollapsed(false); setPageMode('history');
         await copyText(record.greeting); setCopied(true);
@@ -112,7 +114,7 @@ export default function App() {
       try {
         chrome.storage.local.get('deepseekApiKey').then((r) => setNeedsSetup(!r.deepseekApiKey));
         const cached = sessionStorage.getItem(CACHE_KEY);
-        if (cached && extractCurrentJD().status === 'valid') { setResult(JSON.parse(cached)); setStatus('ready'); setCollapsed(false); setPageMode('generate'); beginPoll(JSON.parse(cached).greeting); return; }
+        if (cached && extractCurrentJD().status === 'valid') { const restored = JSON.parse(cached); restored.greeting = normalizeGreeting(restored.greeting); sessionStorage.setItem(CACHE_KEY, JSON.stringify(restored)); setResult(restored); setStatus('ready'); setCollapsed(false); setPageMode('generate'); beginPoll(restored.greeting); return; }
       } catch {}
     })();
 
@@ -132,7 +134,7 @@ export default function App() {
   }, []);
 
   const handleGenerate = useCallback(async (focus: FocusOption) => {
-    setCollapsed(false); setDebug('⏳ LLM 分析页面...');
+    setCollapsed(false); setDebug('⏳ 正在分析岗位并生成招呼语...');
     setStatus('loading'); setResult(null); setCopied(false);
     setAutoFilled(false); autoFilledRef.current = false; stopPoll();
 
@@ -144,7 +146,7 @@ export default function App() {
       const pageText = jd.text;
       if (!pageText.trim()) { setDebug('❌ 页面无内容'); setStatus('error'); return; }
 
-      // 第一步：LLM 提取 + 生成
+      // 页面前4000字符已在本地按边界提纯，再交给模型分析和生成
       const response = await chrome.runtime.sendMessage({
         type: 'EXTRACT_AND_GENERATE', pageText, focus,
       }) as {
@@ -156,6 +158,7 @@ export default function App() {
       if (response.error) { setDebug('❌ ' + response.error); setStatus('error'); return; }
 
       const r = response.result!;
+      r.greeting = normalizeGreeting(r.greeting || '');
       if (!r.jdText || r.jdText.trim().length < 20) { await generateWithoutJD(); return; }
 
       // 如果仍然没有 JD 和招呼语
@@ -202,9 +205,9 @@ export default function App() {
   const valid = s >= 0;
 
   return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle' }}>
+    <div style={{ display: 'inline-flex', flexDirection: 'column', verticalAlign: 'middle', width: 360, maxWidth: 'calc(100vw - 32px)', boxSizing: 'border-box', padding: 14, borderRadius: 12, background: '#ffffff', border: '1px solid #dfeee5', boxShadow: '0 6px 22px rgba(34, 85, 57, 0.08)', color: '#374151' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: '#9ca3af' }}>JobMate{pageMode === 'history' ? ' · 历史' : ''}</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#357557' }}>JobMate{pageMode === 'history' ? ' · 历史' : ''}</span>
         <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 4, color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: '1px 8px' }}>收起</button>
       </div>
 
@@ -218,24 +221,24 @@ export default function App() {
         }}>{lookingUp ? '查找中...' : '查历史招呼语 →'}</button>
       </div>
 
-      {jdNotice && <div role="status" data-testid="jd-missing-notice" style={{ marginTop: 8, maxWidth: 340, padding: 8, background: '#fffbeb', color: '#92400e', fontSize: 12, lineHeight: 1.6 }}>{jdNotice}</div>}
+      {jdNotice && <div role="status" data-testid="jd-missing-notice" style={{ marginTop: 8, maxWidth: 340, padding: 10, borderRadius: 8, border: '1px solid #f3e6bb', background: '#fffbeb', color: '#92400e', fontSize: 12, lineHeight: 1.6 }}>{jdNotice}</div>}
 
-      {debug && <div style={{ fontSize: 12, marginTop: 4, maxWidth: 300, lineHeight: 1.4, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#2563eb' }}>{debug}</div>}
+      {debug && <div style={{ fontSize: 12, marginTop: 8, padding: '8px 10px', borderRadius: 8, background: status === 'error' ? '#fef2f2' : '#f0faf5', maxWidth: 340, lineHeight: 1.6, fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', color: debug.startsWith('❌') ? '#dc2626' : debug.startsWith('✅') ? '#16a34a' : '#2563eb' }}><strong>{status === 'error' ? '提示 · ' : status === 'loading' ? '处理中 · ' : '状态 · '}</strong>{debug}</div>}
 
       {result && status === 'ready' && (
-        <div style={{ marginTop: 8, padding: 12, borderRadius: 8, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
+        <div style={{ marginTop: 10, padding: 12, borderRadius: 10, maxWidth: 340, background: '#fff', border: '1px solid #e5e7eb', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
           {jdNotice && <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>未获取 JD · 基于简历技能生成</div>}
           {valid && <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', borderRadius: 6, background: valid ? (s >= 80 ? '#f0fdf4' : s >= 60 ? '#fffbeb' : '#fef2f2') : '#f9fafb' }}>
             <span style={{ fontSize: 12, color: '#6b7280' }}>匹配度</span>
             <span style={{ fontSize: 24, fontWeight: 700, color: scoreColor(s), lineHeight: 1 }}>{valid ? s : '—'}</span>
             {valid && <span style={{ fontSize: 12, color: '#9ca3af' }}>/100</span>}
-            {jdNotice && <div style={{ fontSize: 12, color: '#92400e', marginBottom: 8 }}>未获取 JD · 基于简历技能生成</div>}
+
           {valid && <div style={{ flex: 1, height: 6, borderRadius: 3, background: '#e5e7eb', overflow: 'hidden' }}><div style={{ width: `${s}%`, height: '100%', borderRadius: 3, background: scoreColor(s), transition: 'width 0.5s' }} /></div>}
           </div>}
           {formatCheck && [...formatCheck.errors, ...formatCheck.warnings].map(note => <div key={note} role="status" style={{ fontSize: 12, color: '#92400e', marginBottom: 6 }}>{note}</div>)}
           {result.scoreReason && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, lineHeight: 1.5, padding: '6px 8px', borderRadius: 4, background: '#f9fafb' }}>💡 {result.scoreReason}</div>}
           <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1f2937', marginBottom: 10, whiteSpace: 'pre-wrap' }}>{result.greeting}</div>
-            <button onClick={handleCopy} style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: copied ? '#16a34a' : '#22c55e', color: '#fff' }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>
+            <button onClick={handleCopy} style={{ width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: copied ? '#438b65' : '#5ebb8a', color: '#fff' }}>{copied ? '✅ 已复制 — Ctrl+V 粘贴' : '📋 复制招呼语'}</button>
         </div>
       )}
       <Toast toast={toast} onDone={clearToast} />

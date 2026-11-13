@@ -39,18 +39,19 @@ export function GreetingButton({ onGenerate, loading, disabled, disabledReason }
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {OPTIONS.map((opt) => {
           const isSelected = selected === opt;
           const isThisLoading = isSelected && loading;
           return (
             <button
               key={opt}
+              aria-pressed={isSelected}
               onClick={() => handleClick(opt)}
               disabled={disabled || loading}
               style={{
                 padding: '6px 12px',
-                border: isSelected && !disabled ? '2px solid #5ebb8a' : '1px solid #d1d5db',
+                border: isSelected && !disabled ? '1px solid #5ebb8a' : '1px solid #d1d5db',
                 borderRadius: 6,
                 background: isSelected && !disabled ? '#5ebb8a' : '#fff',
                 color: isSelected && !disabled ? '#fff' : '#374151',

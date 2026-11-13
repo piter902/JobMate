@@ -130,7 +130,7 @@ export function buildExtractAndGeneratePrompt(pageText: string, focus: FocusOpti
     user: `【我的简历（只有这些是真实的，不能超出此范围）】
 ${resumeText || '（未提供简历）'}
 
-【Boss直聘页面文本】
+【本地提纯后的当前岗位文本】
 ${pageText}
 
 侧重点：${focusMap[focus]}

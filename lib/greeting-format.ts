@@ -1,5 +1,8 @@
 export function normalizeGreeting(text:string):string {
- const normalized=text.replace(/\r\n?/g,'\n');
+ const normalized=text.replace(/\r\n?/g,'\n')
+  // Decode literal escapes only before list markers; preserve other backslashes.
+  .replace(/\\r\\n(?=\s*\d{1,2}[.、．）)](?!\d))/g,'\n')
+  .replace(/\\n(?=\s*\d{1,2}[.、．）)](?!\d))/g,'\n');
  // Only sequential list markers at sentence/line boundaries are repaired.
  // Do not split decimals, dates, versions or numbers such as 10+.
  const pattern=/(^|[。！？!?；;\n])([ \t]*)(\d{1,2})[.、．）)](?!\d)[ \t]*/g;

@@ -1,3 +1,5 @@
+import { normalizeGreeting } from './greeting-format';
+
 export interface GreetingRecord {
   company: string;
   jobTitle: string;
@@ -19,17 +21,17 @@ export async function saveGreeting(record: GreetingRecord): Promise<void> {
       r.jobTitle.trim() === record.jobTitle.trim(),
     );
     if (idx >= 0) list.splice(idx, 1);
-    list.unshift(record);
+    list.unshift({ ...record, greeting: normalizeGreeting(record.greeting) });
     await chrome.storage.local.set({ [STORAGE_KEY]: list });
   } catch {
     await chrome.storage.local.remove(STORAGE_KEY);
-    await chrome.storage.local.set({ [STORAGE_KEY]: [record] });
+    await chrome.storage.local.set({ [STORAGE_KEY]: [{ ...record, greeting: normalizeGreeting(record.greeting) }] });
   }
 }
 
 export async function loadAll(): Promise<GreetingRecord[]> {
   const r = await chrome.storage.local.get(STORAGE_KEY);
-  return (r[STORAGE_KEY] || []) as GreetingRecord[];
+  return ((r[STORAGE_KEY] || []) as GreetingRecord[]).map(record => ({ ...record, greeting: normalizeGreeting(record.greeting) }));
 }
 
 /** 匹配：公司全称 + 岗位全称 精确相等 */
@@ -50,7 +52,7 @@ export async function updateRecord(
     r.company.trim() === company.trim() && r.jobTitle.trim() === jobTitle.trim(),
   );
   if (idx >= 0) {
-    list[idx] = { ...list[idx], ...updates, time: Date.now() };
+    list[idx] = { ...list[idx], ...updates, greeting: normalizeGreeting(updates.greeting ?? list[idx].greeting), time: Date.now() };
     await chrome.storage.local.set({ [STORAGE_KEY]: list });
   }
 }

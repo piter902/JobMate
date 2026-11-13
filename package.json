@@ -10,10 +10,11 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
-    "test:local": "node tests/local/run.cjs && node tests/local/f02.cjs && node tests/local/f03.cjs && node tests/local/f04-rules.cjs && node tests/local/f04.cjs",
+    "test:local": "node tests/local/run.cjs && node tests/local/f02.cjs && node tests/local/f03.cjs && node tests/local/f04-rules.cjs && node tests/local/f04.cjs && node tests/local/f05-newline.cjs",
     "test:resume-e2e": "node tests/local/resume-e2e.cjs",
     "test:f05": "node tests/local/f05-live.cjs",
-    "test:f05:live": "node tests/local/f05-live.cjs"
+    "test:f05:live": "node tests/local/f05-live.cjs",
+    "test:f05:local": "node tests/local/f05-newline.cjs"
   },
   "dependencies": {
     "jszip": "^3.10.2",
