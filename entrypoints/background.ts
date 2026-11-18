@@ -1,3 +1,4 @@
+import { generateResumeGreeting } from '@/lib/resume-greeting';
 import { generateGreeting, extractAndGenerate, validateApiKey } from '@/lib/deepseek';
 import { storage } from '@/lib/storage';
 import { track } from '@/lib/analytics';
@@ -18,6 +19,14 @@ async function handleMessage(message: unknown) {
   const msg = message as { type: string };
 
   switch (msg.type) {
+    case 'GENERATE_RESUME_GREETING': {
+      try {
+        const { text } = await storage.getActiveResume();
+        return { type: 'GENERATE_RESUME_GREETING_RESULT', result: generateResumeGreeting(text) };
+      } catch (err) {
+        return { type: 'GENERATE_RESUME_GREETING_RESULT', error: (err as Error).message };
+      }
+    }
     case 'EXTRACT_AND_GENERATE': {
       const { pageText, focus } = message as ExtReq;
       try {
@@ -39,7 +48,7 @@ async function handleMessage(message: unknown) {
         const apiKey = await storage.getApiKey();
         if (!apiKey) return { type: 'GENERATE_GREETING_RESULT', error: '请先设置 API Key' };
         const { text: resumeText } = await storage.getActiveResume();
-        const result = await generateGreeting({ apiKey, resumeText, jdText, focus });
+        const result = jdText.trim() ? await generateGreeting({ apiKey, resumeText, jdText, focus }) : generateResumeGreeting(resumeText);
         track('greeting_generated', { focus, score: result.score });
         return { type: 'GENERATE_GREETING_RESULT', result };
       } catch (err) {

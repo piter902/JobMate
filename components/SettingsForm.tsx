@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { storage } from '@/lib/storage';
 import type { ResumeItem } from '@/lib/storage';
+import { normalizeSections, validateResumeText } from '@/lib/resume-layout';
 import { parseResume } from '@/lib/resume-parser';
 
 const FEISHU_URL = 'https://scnanhq8rwck.feishu.cn/wiki/DkScwkZiKigkgBkprZncGHpFnpe';
@@ -10,6 +11,7 @@ export function SettingsForm() {
   const [maskedKey, setMaskedKey] = useState('');
   const [resumes, setResumes] = useState<ResumeItem[]>([]);
   const [selectedId, setSelectedId] = useState('');
+  const [draft, setDraft] = useState<{ text: string; fileName: string; warnings: string[] } | null>(null);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -41,16 +43,27 @@ export function SettingsForm() {
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
-    setParsing(true); setMessage(null);
+    setParsing(true); setMessage(null); setDraft(null);
     try {
       const result = await parseResume(file);
-      await storage.addResume(result.text, result.fileName);
-      await load();
-      setMessage({ text: `"${result.fileName}" 上传成功`, type: 'success' });
+      setDraft(result);
     } catch (err) {
       setMessage({ text: (err as Error).message || '解析失败', type: 'error' });
-    } finally { setParsing(false); }
+    } finally { setParsing(false); e.target.value = ''; }
   }, [load]);
+
+  const handleConfirmResume = async () => {
+    if (!draft) return;
+    const text = normalizeSections(draft.text);
+    if (!text.trim()) { setMessage({ text: '简历文本为空，请补充后保存', type: 'error' }); return; }
+    setSaving(true);
+    try {
+      await storage.addResume(text, draft.fileName);
+      setDraft(null); await load();
+      setMessage({ text: '简历已确认并保存', type: 'success' });
+    } catch { setMessage({ text: '保存失败，请重试', type: 'error' }); }
+    finally { setSaving(false); }
+  };
 
   const handleSelect = useCallback(async (id: string) => {
     await storage.selectResume(id); setSelectedId(id);
@@ -61,24 +74,24 @@ export function SettingsForm() {
   }, [load]);
 
   return (
-    <div style={{ width: '100%', padding: 20, boxSizing: 'border-box', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151' }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>🤖 JobMate</h1>
+    <div style={{ width: '100%', padding: 20, boxSizing: 'border-box', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', fontSize: 14, color: '#374151', background: '#f7fbf8' }}>
+      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20 }}>JobMate</h1>
         <p style={{ fontSize: 12, color: '#9ca3af', marginTop: -12, marginBottom: 20, lineHeight: 1.5 }}>AI 求职助手 — 智能招呼语、JD-简历匹配度分析、面试评估</p>
 
 
-      <section style={{ marginBottom: 24 }}>
+      <section style={{ marginBottom: 16, background: '#fff', border: '1px solid #e1eee6', padding: 14, borderRadius: 10 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>DeepSeek API Key</h2>
         {maskedKey && <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>当前: {maskedKey}</p>}
         <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
           placeholder="sk-xxxxxxxxxxxxxxxx"
           style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
         <button onClick={handleSaveKey} disabled={saving} style={{
-          marginTop: 8, padding: '8px 16px', background: '#2563eb', color: '#fff',
+          marginTop: 8, padding: '8px 16px', background: '#5ebb8a', color: '#fff',
           border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', opacity: saving ? 0.6 : 1,
         }}>{saving ? '验证中...' : '保存并验证'}</button>
       </section>
 
-      <section style={{ marginBottom: 24 }}>
+      <section style={{ marginBottom: 16, background: '#fff', border: '1px solid #e1eee6', padding: 14, borderRadius: 10 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>我的简历（可多份）</h2>
         {resumes.map((r) => (
           <div key={r.id} onClick={() => handleSelect(r.id)} style={{
@@ -93,7 +106,7 @@ export function SettingsForm() {
               </p>
               <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9ca3af' }}>{r.text.length} 字符</p>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); handleRemove(r.id); }} style={{
+            <button aria-label={'删除简历：' + r.fileName} onClick={(e) => { e.stopPropagation(); handleRemove(r.id); }} style={{
               background: 'none', border: 'none', color: '#9ca3af', fontSize: 16, cursor: 'pointer', padding: '0 4px',
             }}>×</button>
           </div>
@@ -104,23 +117,20 @@ export function SettingsForm() {
         </label>
       </section>
 
-      <section style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>联系作者</h2>
-        <p style={{ fontSize: 11, color: '#9ca3af', marginBottom: 10, lineHeight: 1.5 }}>简历优化、求职咨询或商务合作，欢迎加微信交流</p>
+      {draft && <section aria-label="简历解析预览" style={{ marginBottom: 16, background: '#fff', border: '1px solid #e1eee6', padding: 14, borderRadius: 10 }}>
+        <h2 style={{ fontSize: 14 }}>确认简历章节和内容归属</h2>
+        <p>请对照原件检查章节顺序，可直接修改文本。确认后才会保存并用于生成。</p>
+        {[...new Set([...draft.warnings, ...validateResumeText(draft.text)])].map(w => <p key={w} role="status" style={{ color: '#92400e' }}>{w}</p>)}
+        <textarea aria-label="简历文本预览" value={draft.text} onChange={e => setDraft({ ...draft, text: e.target.value })} style={{ width: '100%', minHeight: 260, boxSizing: 'border-box', padding: 10, border: '1px solid #d1e3d8', borderRadius: 8, lineHeight: 1.7, resize: 'vertical' }} />
+        <button onClick={handleConfirmResume} disabled={saving || !draft.text.trim()} style={{ marginTop: 10, padding: '8px 12px', background: '#5ebb8a', color: 'white', border: 0, borderRadius: 6, opacity: saving || !draft.text.trim() ? 0.5 : 1 }}>确认并保存简历</button>
+        <button onClick={() => setDraft(null)} disabled={saving} style={{ marginLeft: 8, padding: '8px 12px', background: 'white', color: '#52675b', border: '1px solid #d1e3d8', borderRadius: 6 }}>取消</button>
+      </section>}
 
-        <div style={{ textAlign: 'center' }}>
-          <img src={chrome.runtime.getURL('qrcode.png')} alt="微信二维码" style={{
-            width: 160, height: 160, borderRadius: 8, border: '1px solid #e5e7eb',
-          }} />
-          <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>扫码添加微信</p>
-        </div>
-      </section>
-
-      <section style={{ marginBottom: 24 }}>
-        <a href={FEISHU_URL} target="_blank" style={{
-          display: 'block', padding: 10, borderRadius: 6, background: '#f0f4ff',
-          color: '#2563eb', fontSize: 13, textDecoration: 'none', textAlign: 'center',
-          border: '1px solid #dbeafe',
+      <section style={{ marginBottom: 16, background: '#fff', border: '1px solid #e1eee6', padding: 14, borderRadius: 10 }}>
+        <a href={FEISHU_URL} target="_blank" rel="noopener noreferrer" style={{
+          display: 'block', padding: 10, borderRadius: 6, background: '#f0faf5',
+          color: '#357557', fontSize: 13, textDecoration: 'none', textAlign: 'center',
+          border: '1px solid #dfeee5',
         }}>📖 使用文档</a>
       </section>
 

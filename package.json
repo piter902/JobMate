@@ -9,9 +9,15 @@
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
-    "zip:firefox": "wxt zip -b firefox"
+    "zip:firefox": "wxt zip -b firefox",
+    "test:local": "node tests/local/run.cjs && node tests/local/f02.cjs && node tests/local/f03.cjs && node tests/local/f04-rules.cjs && node tests/local/f04.cjs && node tests/local/f05-newline.cjs",
+    "test:resume-e2e": "node tests/local/resume-e2e.cjs",
+    "test:f05": "node tests/local/f05-live.cjs",
+    "test:f05:live": "node tests/local/f05-live.cjs",
+    "test:f05:local": "node tests/local/f05-newline.cjs"
   },
   "dependencies": {
+    "jszip": "^3.10.2",
     "mammoth": "^1.8.0",
     "pdfjs-dist": "^4.9.155",
     "playwright": "^1.61.1",
@@ -20,6 +26,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/chrome": "^0.3.7",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@wxt-dev/module-react": "^1.1.0",
